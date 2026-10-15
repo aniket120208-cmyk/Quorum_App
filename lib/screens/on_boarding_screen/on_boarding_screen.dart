@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:quorum_app/screens/sign_up_screen/sign_up_screen.dart';
 
 class FeatureItem {
   final IconData icon;
@@ -218,7 +219,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             width: double.infinity,
                             height: 56,
                             child: ElevatedButton(
-                              onPressed: () {},
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const SignUpScreen(),
+                                  ),
+                                );
+                              },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF2E5BFF),
                                 elevation: 0,
