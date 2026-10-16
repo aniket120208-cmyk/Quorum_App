@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:quorum_app/screens/sign_up_screen/sign_up_screen.dart';
+import 'package:quorum_app/sign_in_screen/sign_in_screen.dart';
 
 class FeatureItem {
   final IconData icon;
@@ -223,7 +223,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) => const SignUpScreen(),
+                                    builder: (context) => const SignInScreen(),
                                   ),
                                 );
                               },
