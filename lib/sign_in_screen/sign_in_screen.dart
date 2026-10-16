@@ -191,9 +191,10 @@ class _SignInScreenState extends State<SignInScreen> {
                                     child: ElevatedButton(
                                       onPressed: _isFormFilled ? _submitForm : null,
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(0xFF3B4AF5),
-                                        disabledBackgroundColor: const Color(0xFF2E337A).withValues(alpha: 0.45),
-                                        disabledForegroundColor: Colors.white.withValues(alpha: 0.35),
+                                        backgroundColor: const Color(0xFF4C3AE3),
+                                        disabledBackgroundColor: const Color(0xFF4C3AE3).withOpacity(0.5),
+                                        foregroundColor: Colors.white,
+                                        disabledForegroundColor: Colors.white60,
                                         elevation: 0,
                                         shape: RoundedRectangleBorder(
                                           borderRadius: BorderRadius.circular(16),
@@ -202,7 +203,6 @@ class _SignInScreenState extends State<SignInScreen> {
                                       child: const Text(
                                         'Sign In',
                                         style: TextStyle(
-                                          color: Colors.white,
                                           fontSize: 16,
                                           fontWeight: FontWeight.w600,
                                         ),

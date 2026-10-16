@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:quorum_app/reset_password_screen/reset_password_screen.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -70,11 +71,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
   void _submitForm() {
     if (_formKey.currentState?.validate() ?? false) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('OTP sent successfully!'),
-        ),
-      );
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => ResetPasswordScreen(email: _displayEmail,)));
     } else {
       setState(() {
         _autoValidateMode = AutovalidateMode.onUserInteraction;
@@ -316,9 +313,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                                     child: ElevatedButton(
                                       onPressed: _isEmailFilled ? _submitForm : null,
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(0xFF3B4AF5),
-                                        disabledBackgroundColor: const Color(0xFF2E337A).withValues(alpha: 0.45),
-                                        disabledForegroundColor: Colors.white.withValues(alpha: 0.35),
+                                        backgroundColor: const Color(0xFF4C3AE3),
+                                        disabledBackgroundColor: const Color(0xFF4C3AE3).withOpacity(0.5),
+                                        foregroundColor: Colors.white,
+                                        disabledForegroundColor: Colors.white60,
                                         elevation: 0,
                                         shape: RoundedRectangleBorder(
                                           borderRadius: BorderRadius.circular(16),
@@ -327,7 +325,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                                       child: const Text(
                                         'Send Otp',
                                         style: TextStyle(
-                                          color: Colors.white,
                                           fontSize: 16,
                                           fontWeight: FontWeight.w600,
                                         ),
