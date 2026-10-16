@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:quorum_app/forgot_password_screen/forgot_password_screen.dart';
+import 'package:quorum_app/screens/forgot_password_screen/forgot_password_screen.dart';
 import 'package:quorum_app/screens/sign_up_screen/sign_up_screen.dart';
 
 class SignInScreen extends StatefulWidget {

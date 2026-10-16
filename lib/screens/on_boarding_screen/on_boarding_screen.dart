@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:quorum_app/sign_in_screen/sign_in_screen.dart';
+import 'package:quorum_app/screens/sign_in_screen/sign_in_screen.dart';
 
 class FeatureItem {
   final IconData icon;

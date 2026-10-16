@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:quorum_app/reset_password_screen/reset_password_screen.dart';
+import 'package:quorum_app/screens/reset_password_screen/reset_password_screen.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
