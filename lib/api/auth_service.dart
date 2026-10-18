@@ -32,7 +32,7 @@ class AuthService {
   }
   Future<Map<String, dynamic>> getUserProfile() async{
     try{
-      final response = await apiClient.dio.get('/user/profile');
+      final response = await apiClient.dio.get('/api/auth/me');
       return response.data as Map<String, dynamic>;
     } on DioException catch(e){
       throw Exception(e.response?.data['message'] ?? 'Failed to load profile');
@@ -50,5 +50,9 @@ class AuthService {
     } finally{
       await apiClient.tokenStorage.clearTokens();
     }
+  }
+  Future<bool> hasStoredSession() async {
+    final token = await ApiClient.instance.tokenStorage.getRefreshToken();
+    return token != null && token.isNotEmpty;
   }
 }

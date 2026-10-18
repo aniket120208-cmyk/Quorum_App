@@ -21,19 +21,23 @@ class ApiClient {
         }
       )
     );
-    if(kDebugMode){
-    dio.interceptors.addAll([
+    dio.interceptors.add(
       JwtInterceptor(
-        dio: dio, 
+        dio: dio,
         tokenStorage: tokenStorage,
-        refreshPath: '/api/auth/refresh-token'),
-      LogInterceptor(
-        requestHeader: true,
-        requestBody: true,
-        responseBody: true,
-        error: true,
-      )
-    ]);
-    }
+        refreshPath: '/api/auth/refresh-token',
+      ),
+    );
+
+    if (kDebugMode) {
+    dio.interceptors.add(
+    LogInterceptor(
+      requestHeader: true,
+      requestBody: true,
+      responseBody: true,
+      error: true,
+      ),
+    );
+  }
   }
 }
