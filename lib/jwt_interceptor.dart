@@ -10,7 +10,7 @@ class JwtInterceptor extends QueuedInterceptor{
   JwtInterceptor({
     required this.dio,
     required this.tokenStorage,
-    this.refreshPath = '/auth/refresh',
+    this.refreshPath = '/api/auth/refresh-token',
   });
 
   @override
@@ -34,8 +34,10 @@ class JwtInterceptor extends QueuedInterceptor{
     ) async{
       final isUnauthorized = err.response?.statusCode == 401;
       final isRefreshRequest = err.requestOptions.path.contains(refreshPath);
-
-      if(isRefreshRequest && !isRefreshRequest){
+      if (err.requestOptions.path.contains('/api/auth/login')) {
+        return handler.next(err);
+      }
+      if(isUnauthorized && !isRefreshRequest){
         final refreshToken = await tokenStorage.getRefreshToken();
         if(refreshToken !=null && refreshToken.isNotEmpty){
           try{
@@ -44,7 +46,7 @@ class JwtInterceptor extends QueuedInterceptor{
               refreshPath,
               data: {'refreshToken' : refreshToken},
             );
-            final newTokens = TokenModel.fromJson(response.data);
+            final newTokens = TokenModel.fromJson(response.data['data']);
             await tokenStorage.saveTokens(newTokens);
             final RequestOptions = err.requestOptions;
             RequestOptions.headers['Authorization'] = 'Bearer ${newTokens.accessToken}';

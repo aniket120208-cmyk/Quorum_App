@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:quorum_app/screens/forgot_password_screen/forgot_password_screen.dart';
 import 'package:quorum_app/screens/sign_up_screen/sign_up_screen.dart';
+import 'package:quorum_app/api/auth_service.dart';
+import 'package:quorum_app/api/api_exception.dart';
+import 'package:quorum_app/screens/home_screen/home_screen.dart';
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -12,7 +15,7 @@ class _SignInScreenState extends State<SignInScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-
+  bool _isLoading = false;
   AutovalidateMode _autoValidateMode = AutovalidateMode.disabled;
   bool _obscurePassword = true;
   bool _isFormFilled = false;
@@ -45,19 +48,31 @@ class _SignInScreenState extends State<SignInScreen> {
     super.dispose();
   }
 
-  void _submitForm() {
-    if (_formKey.currentState?.validate() ?? false) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Signed in successfully!'),
-        ),
-      );
-    } else {
-      setState(() {
-        _autoValidateMode = AutovalidateMode.onUserInteraction;
-      });
-    }
+  Future<void> _submitForm() async {
+  if (!(_formKey.currentState?.validate() ?? false)) {
+    setState(() => _autoValidateMode = AutovalidateMode.onUserInteraction);
+    return;
   }
+
+  setState(() => _isLoading = true);
+  try {
+    await AuthService.instance.login(
+      email: _emailController.text.trim(),
+      password: _passwordController.text,
+    );
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => HomeScreen()),
+      (_) => false,
+    );
+  } on ApiException catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+  } finally {
+    if (mounted) setState(() => _isLoading = false);
+  }
+}
 
   @override
   Widget build(BuildContext context) {
@@ -189,7 +204,7 @@ class _SignInScreenState extends State<SignInScreen> {
                                     width: double.infinity,
                                     height: 52,
                                     child: ElevatedButton(
-                                      onPressed: _isFormFilled ? _submitForm : null,
+                                      onPressed: (_isFormFilled && !_isLoading) ? _submitForm : null,
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: const Color(0xFF4C3AE3),
                                         disabledBackgroundColor: const Color(0xFF4C3AE3).withOpacity(0.5),
@@ -200,13 +215,12 @@ class _SignInScreenState extends State<SignInScreen> {
                                           borderRadius: BorderRadius.circular(16),
                                         ),
                                       ),
-                                      child: const Text(
-                                        'Sign In',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
+                                      child: _isLoading ? const SizedBox(
+                                        height: 22,
+                                        width: 22,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                      )
+                                      : const Text('Sign In', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                                     ),
                                   ),
                                 ],
