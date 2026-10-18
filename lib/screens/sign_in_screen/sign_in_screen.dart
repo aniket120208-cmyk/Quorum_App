@@ -63,7 +63,7 @@ class _SignInScreenState extends State<SignInScreen> {
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(builder: (_) => HomeScreen()),
+      MaterialPageRoute(builder: (_) => MainNavigationScreen()),
       (_) => false,
     );
   } on ApiException catch (e) {
