@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:quorum_app/models/chat_models.dart';
+import 'chat_room_screen.dart';
 import 'chat_widgets.dart';
 
 class AppColors {
@@ -79,6 +80,7 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final String _currentUserId = 'user_1';
+  final String _currentUserName = 'You';
   List<Conversation> _conversations = [];
   bool _isLoading = false;
 
@@ -113,6 +115,35 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _openChatRoom(Conversation conversation) async {
+    final index = _conversations.indexWhere((c) => c.id == conversation.id);
+    if (index != -1 && _conversations[index].unreadCount > 0) {
+      setState(() {
+        final c = _conversations[index];
+        _conversations[index] = Conversation(
+          id: c.id,
+          directName: c.directName,
+          groupTitle: c.groupTitle,
+          isGroup: c.isGroup,
+          avatar: c.avatar,
+          unreadCount: 0,
+          updatedAt: c.updatedAt,
+          lastMessage: c.lastMessage,
+          members: c.members,
+        );
+      });
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ChatRoomScreen(
+          conversation: conversation,
+          currentUserId: _currentUserId,
+          currentUserName: _currentUserName,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ChatListView(
@@ -120,7 +151,7 @@ class _ChatScreenState extends State<ChatScreen> {
       currentUserId: _currentUserId,
       isLoading: _isLoading,
       onRefresh: _loadConversations,
-      onConversationTap: (conversation) {},
+      onConversationTap: _openChatRoom,
       onNewChatTap: () {},
       onNewGroupTap: () {},
     );
