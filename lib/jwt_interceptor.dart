@@ -41,7 +41,10 @@ class JwtInterceptor extends QueuedInterceptor{
         final refreshToken = await tokenStorage.getRefreshToken();
         if(refreshToken !=null && refreshToken.isNotEmpty){
           try{
-            final refreshDio = Dio(BaseOptions(baseUrl: dio.options.baseUrl));
+            final refreshDio = Dio(BaseOptions(
+              baseUrl: dio.options.baseUrl,
+              headers: {'x-client-platform': 'mobile'},
+              ));
             final response = await refreshDio.post(
               refreshPath,
               data: {'refreshToken' : refreshToken},
@@ -52,10 +55,14 @@ class JwtInterceptor extends QueuedInterceptor{
             RequestOptions.headers['Authorization'] = 'Bearer ${newTokens.accessToken}';
             final retryResponse = await dio.fetch(RequestOptions);
             return handler.resolve(retryResponse);
-          } catch(_){
-            await tokenStorage.clearTokens();
-            return handler.reject(err);
-          }
+          } on DioException catch (e) {
+              if (e.response?.statusCode == 401 || e.response?.statusCode == 403) {
+              await tokenStorage.clearTokens();
+            }
+            return handler.next(err);
+          }  catch (e) {
+              return handler.next(err);
+            }
         }
       }
       return handler.next(err);  
