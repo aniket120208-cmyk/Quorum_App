@@ -2,6 +2,8 @@ import 'package:dio/dio.dart';
 import 'api_client.dart';
 import 'package:quorum_app/models/token_model.dart';
 import 'api_exception.dart';
+import 'package:quorum_app/api/current_user.dart';
+import 'package:quorum_app/api/socket_service.dart';
 
 class AuthService {
   final ApiClient apiClient;
@@ -28,6 +30,8 @@ class AuthService {
       );
       final tokens = TokenModel.fromJson(response.data['data']);
       await apiClient.tokenStorage.saveTokens(tokens);
+      SocketService.instance.disconnect();
+      CurrentUser.clear();
       return tokens;
     } on DioException catch (e) {
       throw _toApiException(e);
@@ -51,6 +55,8 @@ class AuthService {
     try {
       await apiClient.dio.post('/api/auth/logout');
     } finally {
+      SocketService.instance.disconnect();
+      CurrentUser.clear();
       await apiClient.tokenStorage.clearTokens();
     }
   }
