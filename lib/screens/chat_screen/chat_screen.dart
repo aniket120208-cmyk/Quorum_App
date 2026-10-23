@@ -2,18 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:quorum_app/models/chat_models.dart';
 import 'chat_room_screen.dart';
 import 'chat_widgets.dart';
-
-class AppColors {
-  AppColors._();
-
-  static const Color primary = Color(0xFF6366F1);
-  static const Color primaryLight = Color(0xFF818CF8);
-  static const Color surface = Color(0xFF1E293B);
-  static const Color surfaceBorder = Color(0xFF334155);
-  static const Color textPrimary = Color(0xFFF8FAFC);
-  static const Color textSecondary = Color(0xFF94A3B8);
-  static const Color textMuted = Color(0xFF64748B);
-}
+import 'dart:async';
+import 'package:quorum_app/api/api_exception.dart';
+import 'package:quorum_app/api/auth_service.dart';
+import 'package:quorum_app/api/chat_repository.dart';
+import 'package:quorum_app/api/current_user.dart';
+import 'package:quorum_app/api/socket_service.dart';
+import 'user_picker_screen.dart';
 
 enum ChatFilter { all, direct, groups, unread }
 
@@ -79,59 +74,134 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final String _currentUserId = 'user_1';
-  final String _currentUserName = 'You';
+  final _repo = ChatRepository.instance;
+  final _socket = SocketService.instance;
+
+  String _currentUserId = '';
+  String _currentUserName = 'You';
   List<Conversation> _conversations = [];
-  bool _isLoading = false;
+  bool _isLoading = true;
+  String? _error;
+  String? _openConversationId;
+  Timer? _refreshDebounce;
 
   @override
   void initState() {
     super.initState();
-    _loadConversations();
+    _init();
   }
 
-  Future<void> _loadConversations() async {
-    setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 300));
-    if (mounted) {
+  Future<void> _init() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      if (!CurrentUser.isLoaded) {
+        CurrentUser.setFromProfile(await AuthService.instance.getUserProfile());
+      }
+      _currentUserId = CurrentUser.id;
+      _currentUserName = CurrentUser.name;
+
+      await _socket.ensureConnected();
+      _socket.on('conversation:update', _onConversationUpdate);
+      _socket.on('message:new', _onNewMessage);
+      _socket.on('conversation:removed', _onRemoved);
+      _socket.on('connect', _onSocketConnect);
+
+      await _loadConversations();
+    } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _conversations = [
-          Conversation(
-            id: 'c1',
-            directName: 'Alex Rivera',
-            updatedAt: DateTime.now().subtract(const Duration(minutes: 5)),
-            unreadCount: 2,
-            lastMessage: ChatMessage(
-              id: 'm1',
-              senderId: 'user_2',
-              senderName: 'Alex Rivera',
-              previewText: 'Hey, are the designs ready for review?',
-              createdAt: DateTime.now().subtract(const Duration(minutes: 5)),
-            ),
-          ),
-        ];
+        _error = errorText(e);
       });
     }
   }
 
-  Future<void> _openChatRoom(Conversation conversation) async {
-    final index = _conversations.indexWhere((c) => c.id == conversation.id);
-    if (index != -1 && _conversations[index].unreadCount > 0) {
+  @override
+  void dispose() {
+    _refreshDebounce?.cancel();
+    _socket.off('conversation:update', _onConversationUpdate);
+    _socket.off('message:new', _onNewMessage);
+    _socket.off('conversation:removed', _onRemoved);
+    _socket.off('connect', _onSocketConnect);
+    super.dispose();
+  }
+
+  Future<void> _loadConversations({bool silent = false}) async {
+    if (!silent) {
       setState(() {
-        final c = _conversations[index];
-        _conversations[index] = Conversation(
-          id: c.id,
-          directName: c.directName,
-          groupTitle: c.groupTitle,
-          isGroup: c.isGroup,
-          avatar: c.avatar,
-          unreadCount: 0,
-          updatedAt: c.updatedAt,
-          lastMessage: c.lastMessage,
-          members: c.members,
-        );
+        _isLoading = true;
+        _error = null;
       });
+    }
+    try {
+      final list = await _repo.conversations(_currentUserId);
+      DateTime stamp(Conversation c) => c.lastMessage?.createdAt ?? c.updatedAt;
+      list.sort((a, b) => stamp(b).compareTo(stamp(a)));
+      if (!mounted) return;
+      setState(() {
+        _conversations = list;
+        _isLoading = false;
+        _error = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        if (!silent) _error = errorText(e);
+      });
+    }
+  }
+
+  void _refreshSoon() {
+    _refreshDebounce?.cancel();
+    _refreshDebounce = Timer(const Duration(milliseconds: 300),
+        () => _loadConversations(silent: true));
+  }
+
+  void _onConversationUpdate(dynamic _) => _refreshSoon();
+  void _onSocketConnect(dynamic _) => _refreshSoon();
+
+  void _onNewMessage(dynamic data) {
+    final j = asMap(data);
+    if (j == null || !mounted) return;
+    final convId = (j['conversationId'] ?? '').toString();
+    final i = _conversations.indexWhere((c) => c.id == convId);
+    if (i == -1) {
+      _refreshSoon();
+      return;
+    }
+    final msg = ChatMessage.fromJson(j);
+    final c = _conversations[i];
+    final countsAsUnread =
+        msg.senderId != _currentUserId && _openConversationId != convId;
+    setState(() {
+      _conversations.removeAt(i);
+      _conversations.insert(
+        0,
+        c.copyWith(
+          lastMessage: msg,
+          updatedAt: msg.createdAt,
+          unreadCount: countsAsUnread ? c.unreadCount + 1 : c.unreadCount,
+        ),
+      );
+    });
+  }
+
+  void _onRemoved(dynamic data) {
+    final j = asMap(data);
+    if (j == null || !mounted) return;
+    final id = (j['conversationId'] ?? '').toString();
+    setState(() => _conversations.removeWhere((c) => c.id == id));
+  }
+
+  Future<void> _openChatRoom(Conversation conversation) async {
+    _openConversationId = conversation.id;
+    final i = _conversations.indexWhere((c) => c.id == conversation.id);
+    if (i != -1 && _conversations[i].unreadCount > 0) {
+      setState(() => _conversations[i] = _conversations[i].copyWith(unreadCount: 0));
     }
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -142,6 +212,101 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
     );
+    _openConversationId = null;
+    if (mounted) _loadConversations(silent: true);
+  }
+
+  Future<void> _newChat() async {
+    final picked = await Navigator.of(context).push<List<ChatUser>>(
+      MaterialPageRoute(
+        builder: (_) => UserPickerScreen(currentUserId: _currentUserId),
+      ),
+    );
+    if (picked == null || picked.isEmpty || !mounted) return;
+    final user = picked.first;
+    try {
+      final id = await _repo.startDm(user.id);
+      final existing = _conversations.where((c) => c.id == id);
+      final conv = existing.isNotEmpty
+          ? existing.first
+          : Conversation(
+              id: id,
+              directName: user.name,
+              directEmail: user.email,
+              updatedAt: DateTime.now(),
+              members: [user],
+            );
+      if (!mounted) return;
+      await _openChatRoom(conv);
+    } catch (e) {
+      if (mounted) showErrorSnack(context, errorText(e));
+    }
+  }
+
+  Future<void> _newGroup() async {
+    final picked = await Navigator.of(context).push<List<ChatUser>>(
+      MaterialPageRoute(
+        builder: (_) =>
+            UserPickerScreen(currentUserId: _currentUserId, multi: true),
+      ),
+    );
+    if (picked == null || picked.isEmpty || !mounted) return;
+
+    final name = await _askGroupName();
+    if (name == null || name.isEmpty || !mounted) return;
+
+    try {
+      final id = await _repo.createGroup(
+        name: name,
+        participantIds: picked.map((u) => u.id).toList(),
+      );
+      Conversation? real;
+      try {
+        real = await _repo.conversationById(id, _currentUserId);
+      } catch (_) {}
+      final conv = real ??
+          Conversation(
+            id: id,
+            isGroup: true,
+            groupTitle: name,
+            ownerId: _currentUserId,
+            updatedAt: DateTime.now(),
+            members: [
+              ChatUser(id: _currentUserId, name: _currentUserName),
+              ...picked,
+            ],
+          );
+      if (!mounted) return;
+      await _openChatRoom(conv);
+    } catch (e) {
+      if (mounted) showErrorSnack(context, errorText(e));
+    }
+  }
+
+  Future<String?> _askGroupName() {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Group name',
+            style: TextStyle(color: AppColors.textPrimary)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLength: 100,
+          style: const TextStyle(color: AppColors.textPrimary),
+          decoration: const InputDecoration(hintText: 'e.g. Project Engineering'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -150,10 +315,14 @@ class _ChatScreenState extends State<ChatScreen> {
       conversations: _conversations,
       currentUserId: _currentUserId,
       isLoading: _isLoading,
-      onRefresh: _loadConversations,
+      errorMessage: _error,
+      onRetry: () {
+        _init();
+      },
+      onRefresh: () => _loadConversations(silent: true),
       onConversationTap: _openChatRoom,
-      onNewChatTap: () {},
-      onNewGroupTap: () {},
+      onNewChatTap: _newChat,
+      onNewGroupTap: _newGroup,
     );
   }
 }
