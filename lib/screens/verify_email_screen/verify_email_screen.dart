@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/auth_service.dart';
-import 'package:quorum_app/screens/home_screen/home_screen.dart';
 import 'package:quorum_app/screens/sign_in_screen/sign_in_screen.dart';
 import 'package:quorum_app/screens/use_case_screen/use_case_screen.dart';
 
@@ -78,12 +77,10 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
     }
   }
 
-  void _openNext(bool isOnboarded) {
+  void _openNext() {
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(
-        builder: (_) => isOnboarded ? const MainNavigationScreen() : const UseCaseScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const UseCaseScreen()),
       (_) => false,
     );
   }
@@ -99,7 +96,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
       }
       if (!mounted) return;
       if (result.authenticated) {
-        _openNext(result.isOnboarded);
+        _openNext();
       } else {
         _showMessage('Email verified. Please sign in.');
         Navigator.pushAndRemoveUntil(
