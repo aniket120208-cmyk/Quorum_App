@@ -20,6 +20,7 @@ class _Subscription {
   final String peerId;
   final String kind;
   final RTCPeerConnection pc;
+  MediaStreamTrack? audioTrack;
   bool remoteSet = false;
   final List<RTCIceCandidate> pending = [];
 }
@@ -48,16 +49,16 @@ class MeetingService extends ChangeNotifier {
   final StreamController<String> _notices = StreamController<String>.broadcast();
   io.Socket? _socket;
   MediaStream? _localStream;
-  MediaStream? _screenStream;
   MediaStreamTrack? _cameraTrack;
   RTCPeerConnection? _publisher;
-  RTCRtpSender? _videoSender;
   Timer? _joinTimeout;
   Timer? _sfuRetryTimer;
   Map<String, dynamic>? _offerPayload;
   final List<Map<String, dynamic>> _sentPublisherCandidates = [];
   bool _sfuJoined = false;
   int _sfuAttempts = 0;
+  int _connectAttempts = 0;
+  static const int _maxConnectAttempts = 3;
 
   final Map<String, RemotePeer> _peers = {};
   final Map<String, _Subscription> _subs = {};
@@ -75,7 +76,7 @@ class MeetingService extends ChangeNotifier {
   bool _hasLocalVideo = false;
   bool _hasLocalAudio = false;
   bool _frontCamera = true;
-  bool _speakerOn = true;
+  bool _soundOn = true;
   bool _chatOpen = false;
   bool _tornDown = false;
   bool _disposed = false;
@@ -88,8 +89,7 @@ class MeetingService extends ChangeNotifier {
   bool get isVideoOff => _isVideoOff;
   bool get hasLocalVideo => _hasLocalVideo;
   bool get isFrontCamera => _frontCamera;
-  bool get isScreenSharing => _screenStream != null;
-  bool get speakerOn => _speakerOn;
+  bool get soundOn => _soundOn;
   int get unreadChat => _unreadChat;
   List<RemotePeer> get participants => _peers.values.toList(growable: false);
   List<MeetingChatMessage> get chat => List.unmodifiable(_chat);
@@ -193,13 +193,13 @@ class MeetingService extends ChangeNotifier {
     if (!_hasLocalVideo) return;
     _isVideoOff = !_isVideoOff;
     _cameraTrack?.enabled = !_isVideoOff;
-    if (_inCall && !isScreenSharing) _emitCam(_isVideoOff);
+    if (_inCall) _emitCam(_isVideoOff);
     _notify();
   }
 
   Future<void> switchCamera() async {
     final track = _cameraTrack;
-    if (track == null || isScreenSharing) return;
+    if (track == null) return;
     try {
       await Helper.switchCamera(track);
       _frontCamera = !_frontCamera;
@@ -209,49 +209,22 @@ class MeetingService extends ChangeNotifier {
     }
   }
 
-  Future<void> toggleSpeaker() async {
-    _speakerOn = !_speakerOn;
-    try {
-      await Helper.setSpeakerphoneOn(_speakerOn);
-    } catch (_) {}
+  Future<void> toggleSound() async {
+    _soundOn = !_soundOn;
+    for (final sub in _subs.values) {
+      final t = sub.audioTrack;
+      if (t != null) await _applySound(t);
+    }
     _notify();
   }
 
-  Future<String?> startScreenShare() async {
-    if (isScreenSharing) return null;
-    final sender = _videoSender;
-    if (sender == null) return 'Screen sharing needs an active video connection';
+  Future<void> _applySound(MediaStreamTrack track) async {
     try {
-      final stream = await navigator.mediaDevices.getDisplayMedia({'video': true, 'audio': false});
-      final tracks = stream.getVideoTracks();
-      if (tracks.isEmpty) return 'Unable to start screen sharing';
-      final track = tracks.first;
-      track.onEnded = () => stopScreenShare();
-      await sender.replaceTrack(track);
-      _screenStream = stream;
-      localRenderer.srcObject = stream;
-      if (_isVideoOff && _inCall) _emitCam(false);
-      _notify();
-      return null;
-    } catch (_) {
-      return 'Unable to start screen sharing';
-    }
-  }
-
-  Future<void> stopScreenShare() async {
-    final stream = _screenStream;
-    if (stream == null) return;
-    _screenStream = null;
-    try {
-      await _videoSender?.replaceTrack(_cameraTrack);
+      track.enabled = _soundOn;
     } catch (_) {}
-    for (final t in stream.getTracks()) {
-      await t.stop();
-    }
-    await stream.dispose();
-    localRenderer.srcObject = _localStream;
-    if (_isVideoOff && _inCall) _emitCam(true);
-    _notify();
+    try {
+      await Helper.setVolume(_soundOn ? 1.0 : 0.0, track);
+    } catch (_) {}
   }
 
   Future<void> join() async {
@@ -260,11 +233,21 @@ class MeetingService extends ChangeNotifier {
         _phase == MeetingPhase.inCall) {
       return;
     }
-    _closeSocket();
+    _connectAttempts = 0;
     _setPhase(MeetingPhase.connecting);
+    await _connect();
+  }
 
-    final token = await ApiClient.instance.tokenStorage.getAccessToken();
-    if (_tornDown) return;
+  Future<void> _connect({bool forceRefresh = false}) async {
+    _closeSocket();
+    _joinTimeout?.cancel();
+    String? token;
+    try {
+      token = await ApiClient.instance.freshAccessToken(force: forceRefresh);
+    } catch (_) {
+      token = await ApiClient.instance.tokenStorage.getAccessToken();
+    }
+    if (_tornDown || _phase != MeetingPhase.connecting) return;
 
     final socket = io.io(
       _socketUrl,
@@ -276,25 +259,42 @@ class MeetingService extends ChangeNotifier {
             'name': userName,
             'role': isHost ? 'host' : 'participant',
           })
+          .enableForceNew()
           .disableAutoConnect()
           .disableReconnection()
           .build(),
     );
     _socket = socket;
     _bindSocket(socket);
-    _joinTimeout?.cancel();
-    _joinTimeout = Timer(const Duration(seconds: 20), () {
-      if (_phase == MeetingPhase.connecting) {
-        _fail('Could not reach the meeting server');
+    _joinTimeout = Timer(const Duration(seconds: 15), () {
+      if (identical(_socket, socket) && _phase == MeetingPhase.connecting) {
+        _retryConnect();
       }
     });
     socket.connect();
   }
 
+  void _retryConnect() {
+    if (_tornDown || _phase != MeetingPhase.connecting) return;
+    _joinTimeout?.cancel();
+    _connectAttempts++;
+    if (_connectAttempts >= _maxConnectAttempts) {
+      _fail('Could not reach the meeting server. Check your connection and try again.');
+      return;
+    }
+    _closeSocket();
+    Timer(Duration(milliseconds: 700 * _connectAttempts), () {
+      if (!_tornDown && _phase == MeetingPhase.connecting) {
+        _connect(forceRefresh: true);
+      }
+    });
+  }
+
   void _bindSocket(io.Socket s) {
     s.onConnect((_) => _emitJoin(s));
     s.onConnectError((_) {
-      if (_phase == MeetingPhase.connecting) _fail('Could not reach the meeting server');
+      if (!identical(_socket, s)) return;
+      if (_phase == MeetingPhase.connecting) _retryConnect();
     });
     s.onDisconnect((_) {
       if (_tornDown || _phase == MeetingPhase.ended || _phase == MeetingPhase.failed) return;
@@ -438,7 +438,14 @@ class MeetingService extends ChangeNotifier {
       _joinTimeout?.cancel();
       final res = asMap(raw);
       if (res == null || res['success'] != true) {
-        _fail((res?['message'] ?? 'Unable to join the meeting').toString());
+        final text = (res?['message'] ?? 'Unable to join the meeting').toString();
+        final lower = text.toLowerCase();
+        final authIssue = lower.contains('unauthor') || lower.contains('token') || lower.contains('jwt');
+        if (authIssue && _phase == MeetingPhase.connecting && _connectAttempts < _maxConnectAttempts - 1) {
+          _retryConnect();
+          return;
+        }
+        _fail(text);
         return;
       }
       final data = res['data'] is Map ? Map<String, dynamic>.from(res['data'] as Map) : <String, dynamic>{};
@@ -558,8 +565,7 @@ class MeetingService extends ChangeNotifier {
         _publisher = pc;
         pc.onIceCandidate = (c) => _emitCandidate(c);
         for (final track in stream.getTracks()) {
-          final sender = await pc.addTrack(track, stream);
-          if (track.kind == 'video') _videoSender = sender;
+          await pc.addTrack(track, stream);
         }
       }
 
@@ -617,6 +623,11 @@ class MeetingService extends ChangeNotifier {
 
       pc.onIceCandidate = (c) => _emitCandidate(c, trackId: trackId);
       pc.onTrack = (RTCTrackEvent e) async {
+        if (e.track.kind == 'audio') {
+          sub.audioTrack = e.track;
+          await _applySound(e.track);
+          return;
+        }
         if (e.track.kind != 'video') return;
         MediaStream stream;
         if (e.streams.isNotEmpty) {
@@ -910,7 +921,6 @@ class MeetingService extends ChangeNotifier {
     _subs.clear();
     final pub = _publisher;
     _publisher = null;
-    _videoSender = null;
     _publisherRemoteSet = false;
     _pendingPublisherCandidates.clear();
     if (pub != null) await _closePc(pub);
@@ -918,16 +928,6 @@ class MeetingService extends ChangeNotifier {
       await peer.dispose();
     }
     _peers.clear();
-
-    final screen = _screenStream;
-    _screenStream = null;
-    if (screen != null) {
-      for (final t in screen.getTracks()) {
-        await t.stop();
-      }
-      await screen.dispose();
-      localRenderer.srcObject = _localStream;
-    }
 
     if (!keepLocal) {
       final local = _localStream;
