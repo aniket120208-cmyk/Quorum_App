@@ -40,10 +40,16 @@ dependencies:
   image_picker: ^1.2.4
   file_picker: ^13.1.0
   url_launcher: ^6.3.3
+  flutter_webrtc: ^1.6.2+hotfix.4
+  share_plus: ^13.3.1
+  permission_handler: ^12.0.1
+  shared_preferences: ^2.5.6
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_native_splash: ^2.4.8
+  flutter_launcher_icons: ^0.14.4
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -52,6 +58,14 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
+flutter_native_splash:
+  color: "#090A10"
+  fullscreen: true
+
+  android_12:
+    color: "#090A10"
+    image: lib/assets/transparent.png
+    icon_background_color: "#090A10"
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
@@ -66,7 +80,7 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
       - lib/assets/q.png
-  #   - images/a_dot_ham.jpeg
+      - lib/assets/quorum_logo.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
@@ -93,3 +107,7 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "lib/assets/quorum_logo.png"
