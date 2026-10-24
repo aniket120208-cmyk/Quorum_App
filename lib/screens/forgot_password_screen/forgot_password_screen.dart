@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:quorum_app/api/api_exception.dart';
+import 'package:quorum_app/api/auth_service.dart';
 import 'package:quorum_app/screens/reset_password_screen/reset_password_screen.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
@@ -17,7 +19,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   String _displayEmail = 'example@company.com';
   Timer? _timer;
   int _secondsRemaining = 30;
-  bool _canResend = false;
+  bool _canResend = true;
+  bool _isLoading = false;
 
   final RegExp _emailRegex =  RegExp(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$");
 
@@ -25,7 +28,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   void initState() {
     super.initState();
     _emailController.addListener(_handleEmailChange);
-    _startCountdown();
   }
 
   void _handleEmailChange() {
@@ -69,14 +71,47 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     super.dispose();
   }
 
-  void _submitForm() {
-    if (_formKey.currentState?.validate() ?? false) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => ResetPasswordScreen(email: _displayEmail,)));
-    } else {
+  Future<bool> _sendOtp() async {
+    if (!(_formKey.currentState?.validate() ?? false)) {
       setState(() {
         _autoValidateMode = AutovalidateMode.onUserInteraction;
       });
+      return false;
     }
+    setState(() => _isLoading = true);
+    try {
+      await AuthService.instance.forgotPassword(_emailController.text.trim());
+      return true;
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+      return false;
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _submitForm() async {
+    if (_isLoading) return;
+    final sent = await _sendOtp();
+    if (!sent || !mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ResetPasswordScreen(email: _emailController.text.trim()),
+      ),
+    );
+  }
+
+  Future<void> _resend() async {
+    if (_isLoading) return;
+    final sent = await _sendOtp();
+    if (!sent || !mounted) return;
+    _startCountdown();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('A new code has been sent')),
+    );
   }
 
   @override
@@ -285,14 +320,14 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
                                       const Text(
-                                        "Didn't receive the link?",
+                                        "Didn't receive the code?",
                                         style: TextStyle(
                                           color: Color(0xFF8E95A9),
                                           fontSize: 13,
                                         ),
                                       ),
                                       GestureDetector(
-                                        onTap: _canResend ? _startCountdown : null,
+                                        onTap: _canResend ? _resend : null,
                                         child: Text(
                                           _canResend
                                               ? 'Resend'
@@ -311,7 +346,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                                     width: double.infinity,
                                     height: 52,
                                     child: ElevatedButton(
-                                      onPressed: _isEmailFilled ? _submitForm : null,
+                                      onPressed: (_isEmailFilled && !_isLoading) ? _submitForm : null,
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: const Color(0xFF4C3AE3),
                                         disabledBackgroundColor: const Color(0xFF4C3AE3).withOpacity(0.5),
@@ -322,13 +357,19 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                                           borderRadius: BorderRadius.circular(16),
                                         ),
                                       ),
-                                      child: const Text(
-                                        'Send Otp',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
+                                      child: _isLoading
+                                          ? const SizedBox(
+                                              height: 22,
+                                              width: 22,
+                                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                            )
+                                          : const Text(
+                                              'Send Otp',
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
                                     ),
                                   ),
                                 ],

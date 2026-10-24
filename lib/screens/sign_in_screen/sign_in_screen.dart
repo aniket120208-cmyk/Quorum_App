@@ -4,6 +4,7 @@ import 'package:quorum_app/screens/sign_up_screen/sign_up_screen.dart';
 import 'package:quorum_app/api/auth_service.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/screens/home_screen/home_screen.dart';
+import 'package:quorum_app/screens/verify_email_screen/verify_email_screen.dart';
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -55,19 +56,31 @@ class _SignInScreenState extends State<SignInScreen> {
   }
 
   setState(() => _isLoading = true);
+  final email = _emailController.text.trim();
+  final password = _passwordController.text;
   try {
     await AuthService.instance.login(
-      email: _emailController.text.trim(),
-      password: _passwordController.text,
+      email: email,
+      password: password,
     );
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(builder: (_) => MainNavigationScreen()),
+      MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
       (_) => false,
     );
   } on ApiException catch (e) {
     if (!mounted) return;
+    if (e.statusCode == 403 && e.message.toLowerCase().contains('verif')) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => VerifyEmailScreen(email: email, password: password),
+        ),
+      );
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
   } finally {
     if (mounted) setState(() => _isLoading = false);

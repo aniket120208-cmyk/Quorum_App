@@ -3,7 +3,16 @@ import 'api_client.dart';
 import 'package:quorum_app/models/token_model.dart';
 import 'api_exception.dart';
 import 'package:quorum_app/api/current_user.dart';
+import 'package:quorum_app/api/notification_service.dart';
+import 'package:quorum_app/api/saved_items_store.dart';
 import 'package:quorum_app/api/socket_service.dart';
+
+class AuthResult {
+  final bool authenticated;
+  final Map<String, dynamic> user;
+  const AuthResult({required this.authenticated, required this.user});
+  bool get isOnboarded => user['isOnboarded'] == true;
+}
 
 class AuthService {
   final ApiClient apiClient;
@@ -16,7 +25,31 @@ class AuthService {
     return ApiException(message, statusCode: e.response?.statusCode);
   }
 
-  Future<TokenModel> login({
+  static Map<String, dynamic> userFrom(dynamic data) {
+    if (data is! Map) return {};
+    final map = Map<String, dynamic>.from(data);
+    if (map['user'] is Map) return Map<String, dynamic>.from(map['user']);
+    return map;
+  }
+
+  Future<AuthResult> _completeAuth(dynamic data) async {
+    final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+    final hasTokens = map['accessToken'] != null && map['refreshToken'] != null;
+    if (!hasTokens) {
+      return AuthResult(authenticated: false, user: userFrom(map));
+    }
+    await apiClient.tokenStorage.saveTokens(TokenModel.fromJson(map));
+    SocketService.instance.disconnect();
+    SavedItemsStore.instance.clear();
+    CurrentUser.clear();
+    var user = userFrom(map);
+    if (!user.containsKey('isOnboarded')) {
+      user = userFrom(await getUserProfile());
+    }
+    return AuthResult(authenticated: true, user: user);
+  }
+
+  Future<AuthResult> login({
     required String email,
     required String password,
   }) async {
@@ -28,11 +61,101 @@ class AuthService {
           'password': password,
         },
       );
-      final tokens = TokenModel.fromJson(response.data['data']);
-      await apiClient.tokenStorage.saveTokens(tokens);
+      return await _completeAuth(response.data['data']);
+    } on DioException catch (e) {
+      throw _toApiException(e);
+    }
+  }
+
+  Future<void> register({
+    required String name,
+    required String email,
+    required String password,
+  }) async {
+    try {
+      await apiClient.dio.post(
+        '/api/auth/register',
+        data: {
+          'name': name,
+          'email': email,
+          'password': password,
+        },
+      );
+    } on DioException catch (e) {
+      throw _toApiException(e);
+    }
+  }
+
+  Future<void> sendVerificationOtp(String email) async {
+    try {
+      await apiClient.dio.post(
+        '/api/otp/send-verification',
+        data: {'email': email},
+      );
+    } on DioException catch (e) {
+      throw _toApiException(e);
+    }
+  }
+
+  Future<AuthResult> verifyEmail({
+    required String email,
+    required String otp,
+  }) async {
+    try {
+      final response = await apiClient.dio.post(
+        '/api/otp/verify-email',
+        data: {
+          'email': email,
+          'otp': otp,
+        },
+      );
+      return await _completeAuth(response.data['data']);
+    } on DioException catch (e) {
+      throw _toApiException(e);
+    }
+  }
+
+  Future<void> forgotPassword(String email) async {
+    try {
+      await apiClient.dio.post(
+        '/api/otp/forgot-password',
+        data: {'email': email},
+      );
+    } on DioException catch (e) {
+      throw _toApiException(e);
+    }
+  }
+
+  Future<void> resetPassword({
+    required String email,
+    required String otp,
+    required String newPassword,
+  }) async {
+    try {
+      await apiClient.dio.post(
+        '/api/otp/reset-password',
+        data: {
+          'email': email,
+          'otp': otp,
+          'newPassword': newPassword,
+        },
+      );
       SocketService.instance.disconnect();
+      SavedItemsStore.instance.clear();
       CurrentUser.clear();
-      return tokens;
+      await apiClient.tokenStorage.clearTokens();
+    } on DioException catch (e) {
+      throw _toApiException(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> saveOnboarding(List<String> useCases) async {
+    try {
+      final response = await apiClient.dio.patch(
+        '/api/users/onboarding',
+        data: {'useCases': useCases},
+      );
+      return userFrom(response.data['data']);
     } on DioException catch (e) {
       throw _toApiException(e);
     }
@@ -52,10 +175,12 @@ class AuthService {
   }
 
   Future<void> logout() async {
+    await NotificationService.instance.stop();
     try {
       await apiClient.dio.post('/api/auth/logout');
     } finally {
       SocketService.instance.disconnect();
+      SavedItemsStore.instance.clear();
       CurrentUser.clear();
       await apiClient.tokenStorage.clearTokens();
     }

@@ -34,7 +34,8 @@ class JwtInterceptor extends QueuedInterceptor{
     ) async{
       final isUnauthorized = err.response?.statusCode == 401;
       final isRefreshRequest = err.requestOptions.path.contains(refreshPath);
-      if (err.requestOptions.path.contains('/api/auth/login')) {
+      final path = err.requestOptions.path;
+      if (path.contains('/api/auth/login') || path.contains('/api/auth/register') || path.contains('/api/otp/')) {
         return handler.next(err);
       }
       if(isUnauthorized && !isRefreshRequest){

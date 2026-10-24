@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:quorum_app/api/api_exception.dart';
+import 'package:quorum_app/api/auth_service.dart';
 import 'package:quorum_app/screens/sign_in_screen/sign_in_screen.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
@@ -19,6 +21,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   bool _obscureConfirmPassword = true;
   int _resendSeconds = 30;
   Timer? _timer;
+  bool _isLoading = false;
+  bool _isResending = false;
 
   bool get _hasMinLength => _newPasswordController.text.length >= 8;
   bool get _hasLetter => RegExp(r'[A-Za-z]').hasMatch(_newPasswordController.text);
@@ -52,6 +56,50 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         timer.cancel();
       }
     });
+  }
+
+  Future<void> _resend() async {
+    if (_isResending) return;
+    setState(() => _isResending = true);
+    try {
+      await AuthService.instance.forgotPassword(widget.email);
+      if (!mounted) return;
+      _startResendTimer();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('A new code has been sent to ${widget.email}')),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _isResending = false);
+    }
+  }
+
+  Future<void> _resetPassword() async {
+    if (!_isFormValid || _isLoading) return;
+    setState(() => _isLoading = true);
+    try {
+      await AuthService.instance.resetPassword(
+        email: widget.email,
+        otp: _otpControllers.map((c) => c.text).join(),
+        newPassword: _newPasswordController.text,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Password reset successfully. Please sign in.')),
+      );
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const SignInScreen()),
+        (_) => false,
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   void _handleOtpPaste(String pastedText) {
@@ -233,8 +281,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                               ),
                             ),
                             GestureDetector(
-                              onTap: _resendSeconds == 0
-                                  ? _startResendTimer
+                              onTap: (_resendSeconds == 0 && !_isResending)
+                                  ? _resend
                                   : null,
                               child: Text(
                                 _resendSeconds > 0
@@ -259,13 +307,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                             width: double.infinity,
                             height: 52,
                             child: ElevatedButton(
-                              onPressed: _isFormValid
-                                  ? () {
-                                      final otp = _otpControllers.map((c) => c.text).join();
-                                      final newPassword = _newPasswordController.text;
-                                      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => SignInScreen()));
-                                    }
-                                  : null,
+                              onPressed: (_isFormValid && !_isLoading) ? _resetPassword : null,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF4C3AE3),
                                 disabledBackgroundColor: const Color(0xFF4C3AE3).withOpacity(0.9),
@@ -276,13 +318,19 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                                   borderRadius: BorderRadius.circular(14),
                                 ),
                               ),
-                              child: const Text(
-                                'Reset password',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
+                              child: _isLoading
+                                  ? const SizedBox(
+                                      height: 22,
+                                      width: 22,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                    )
+                                  : const Text(
+                                      'Reset password',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
                             ),
                           ),
                         ),
