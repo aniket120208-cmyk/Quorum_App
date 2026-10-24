@@ -287,7 +287,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 const SizedBox(height: 22),
                 _buildWorkspaceSection(),
                 const SizedBox(height: 12),
-                _buildFreelanceCard(),
                 const SizedBox(height: 16),
                 CalendarCard(),
               ],
@@ -421,6 +420,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _orgsLoading = false;
         _orgsError = null;
       });
+
+      final withCounts = await Future.wait(orgs.map(_withCounts));
+      if (!mounted) return;
+      setState(() => _orgs = withCounts);
     } catch (e) {
       if (!mounted) return;
 
@@ -431,6 +434,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
       });
     }
+  }
+
+  Future<Organization> _withCounts(Organization org) async {
+    final repo = OrganizationRepository.instance;
+    var members = org.membersCount;
+    var teams = org.teamsCount;
+    try {
+      members = (await repo.members(org.id)).length;
+    } catch (_) {}
+    try {
+      teams = (await repo.teams(org.id)).length;
+    } catch (_) {}
+    return org.copyWith(membersCount: members, teamsCount: teams);
   }
 
   void _retryOrgs() {

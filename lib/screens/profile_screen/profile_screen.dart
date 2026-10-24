@@ -18,6 +18,7 @@ import 'package:quorum_app/screens/organization_screen/create_organization_scree
 import 'package:quorum_app/screens/organization_screen/join_organization_screen.dart';
 import 'package:quorum_app/screens/organization_screen/organization_detail_screen.dart';
 import 'package:quorum_app/screens/organization_screen/organization_widgets.dart';
+import 'package:quorum_app/screens/saved_items_screen/saved_items_screen.dart';
 import 'package:quorum_app/screens/sign_in_screen/sign_in_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -239,6 +240,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 22),
             _sectionTitle('Account'),
             _menuTile(
+              icon: Icons.bookmark_border_rounded,
+              label: 'Saved items',
+              onTap: () => _push(const SavedItemsScreen()),
+            ),
+            _menuTile(
               icon: Icons.notifications_none_rounded,
               label: 'Notifications',
               trailing: ValueListenableBuilder<int>(
@@ -367,7 +373,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const SizedBox(width: 10),
         Expanded(child: _statTile(Icons.task_alt_rounded, _openTasks == null ? '-' : '$_openTasks', 'Open tasks')),
         const SizedBox(width: 10),
-        Expanded(child: _statTile(Icons.videocam_outlined, '$_meetingCount', 'Meetings')),
       ],
     );
   }
