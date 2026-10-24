@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:quorum_app/api/api_client.dart';
 import 'package:quorum_app/api/api_exception.dart';
+import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/models/chat_models.dart';
 
 class ChatRepository {
@@ -29,11 +30,35 @@ class ChatRepository {
     return conv['id'].toString();
   }
 
+  bool _teamIdsLoaded = false;
+
+  Future<void> _loadTeamConversationIds() async {
+    if (_teamIdsLoaded) return;
+    try {
+      final repo = OrganizationRepository.instance;
+      final orgs = await repo.organizations();
+      await Future.wait(orgs.map((o) async {
+        final teams = await repo.teams(o.id);
+        await Future.wait(teams.map((t) async {
+          try {
+            final history = await repo.teamMessages(o.id, t.id);
+            if (history.conversationId.isNotEmpty) {
+              TeamConversations.ids.add(history.conversationId);
+            }
+          } catch (_) {}
+        }));
+      })).timeout(const Duration(seconds: 6));
+      _teamIdsLoaded = true;
+    } catch (_) {}
+  }
+
   Future<List<Conversation>> conversations(String myId) => _guard(() async {
+        await _loadTeamConversationIds();
         final r = await api.dio.get('/api/conversations');
         return _asList(r.data['data'], 'conversations')
             .map((j) => Conversation.fromJson(
                 Map<String, dynamic>.from(j as Map), myId))
+            .where((c) => !c.isTeam)
             .toList();
       });
 
@@ -88,12 +113,6 @@ class ChatRepository {
         });
       });
 
-  Future<void> transferOwnership(String convId, String newOwnerId) =>
-      _guard(() async {
-        await api.dio.post('/api/conversations/$convId/transfer-ownership',
-            data: {'newOwnerId': newOwnerId});
-      });
-
   Future<({List<ChatMessage> items, String? cursor, bool hasMore})> messages(
     String convId, {
     String? cursor,
@@ -114,6 +133,19 @@ class ChatRepository {
           cursor: d['nextCursor']?.toString(),
           hasMore: d['hasNextPage'] == true,
         );
+      });
+
+  Future<ChatMessage> editMessage(String convId, String messageId, String content) =>
+      _guard(() async {
+        final r = await api.dio.patch(
+          '/api/conversations/$convId/messages/$messageId',
+          data: {'content': content},
+        );
+        return ChatMessage.fromJson(Map<String, dynamic>.from(r.data['data'] as Map));
+      });
+
+  Future<void> deleteMessage(String convId, String messageId) => _guard(() async {
+        await api.dio.delete('/api/conversations/$convId/messages/$messageId');
       });
 
   Future<List<ChatUser>> searchUsers(String q) => _guard(() async {

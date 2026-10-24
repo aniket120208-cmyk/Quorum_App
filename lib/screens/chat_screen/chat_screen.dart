@@ -168,6 +168,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final j = asMap(data);
     if (j == null || !mounted) return;
     final convId = (j['conversationId'] ?? '').toString();
+    if (TeamConversations.ids.contains(convId)) return;
     final i = _conversations.indexWhere((c) => c.id == convId);
     if (i == -1) {
       _refreshSoon();
@@ -252,8 +253,9 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     if (picked == null || picked.isEmpty || !mounted) return;
 
-    final name = await _askGroupName();
-    if (name == null || name.isEmpty || !mounted) return;
+    final asked = await _askGroupName();
+    final name = cleanGroupName(asked);
+    if (name.isEmpty || !mounted) return;
 
     try {
       final id = await _repo.createGroup(
@@ -269,7 +271,7 @@ class _ChatScreenState extends State<ChatScreen> {
             id: id,
             isGroup: true,
             groupTitle: name,
-            ownerId: _currentUserId,
+            adminId: _currentUserId,
             updatedAt: DateTime.now(),
             members: [
               ChatUser(id: _currentUserId, name: _currentUserName),

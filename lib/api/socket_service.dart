@@ -18,8 +18,14 @@ class SocketService {
 
   io.Socket? _s;
   final Set<String> _rooms = {};
+  final Set<String> _teamRooms = {};
+  final Set<String> _communityRooms = {};
+  final Set<String> _channelRooms = {};
+  final Set<String> _postRooms = {};
   final Map<String, Set<SocketHandler>> _handlers = {};
   bool _refreshing = false;
+
+  String? activeConversationId;
 
   bool get isConnected => _s?.connected ?? false;
   Future<void> ensureConnected() async {
@@ -53,6 +59,18 @@ class SocketService {
       for (final id in _rooms) {
         sock.emitWithAck('conversation:join', {'conversationId': id},
             ack: (_) {});
+      }
+      for (final id in _teamRooms) {
+        sock.emit('join:conversation', id);
+      }
+      for (final id in _communityRooms) {
+        sock.emit('community:join', {'communityId': id});
+      }
+      for (final id in _channelRooms) {
+        sock.emit('community:channel:join', {'channelId': id});
+      }
+      for (final id in _postRooms) {
+        sock.emit('community:post:join', {'postId': id});
       }
     });
 
@@ -106,6 +124,45 @@ class SocketService {
     }
   }
 
+  void joinTeamRoom(String conversationId) {
+    _teamRooms.add(conversationId);
+    if (isConnected) _s!.emit('join:conversation', conversationId);
+  }
+
+  void leaveTeamRoom(String conversationId) {
+    _teamRooms.remove(conversationId);
+  }
+
+  void joinCommunity(String id) {
+    _communityRooms.add(id);
+    if (isConnected) _s!.emit('community:join', {'communityId': id});
+  }
+
+  void leaveCommunity(String id) {
+    _communityRooms.remove(id);
+    if (isConnected) _s!.emit('community:leave', {'communityId': id});
+  }
+
+  void joinChannel(String id) {
+    _channelRooms.add(id);
+    if (isConnected) _s!.emit('community:channel:join', {'channelId': id});
+  }
+
+  void leaveChannel(String id) {
+    _channelRooms.remove(id);
+    if (isConnected) _s!.emit('community:channel:leave', {'channelId': id});
+  }
+
+  void joinPost(String id) {
+    _postRooms.add(id);
+    if (isConnected) _s!.emit('community:post:join', {'postId': id});
+  }
+
+  void leavePost(String id) {
+    _postRooms.remove(id);
+    if (isConnected) _s!.emit('community:post:leave', {'postId': id});
+  }
+
   void emit(String event, Map<String, dynamic> data) {
     if (isConnected) _s!.emit(event, data);
   }
@@ -133,6 +190,11 @@ class SocketService {
 
   void disconnect() {
     _rooms.clear();
+    _teamRooms.clear();
+    _communityRooms.clear();
+    _channelRooms.clear();
+    _postRooms.clear();
+    activeConversationId = null;
     _s?.dispose();
     _s = null;
   }

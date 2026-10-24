@@ -219,6 +219,13 @@ class CommunityRepository {
         return CommunityPost.fromJson(_map(_data(r)));
       });
 
+  Future<CommunityPost> getPost(String postId) => _guard(() async {
+        final r = await _dio.get('/api/community-posts/$postId');
+        final d = _data(r);
+        final raw = d is Map && d['post'] is Map ? d['post'] : d;
+        return CommunityPost.fromJson(_map(raw));
+      });
+
   Future<void> editPost(String postId, String content) => _guard(() async {
         await _dio.patch('/api/community-posts/$postId', data: {'content': content});
       });

@@ -43,6 +43,19 @@ void showErrorSnack(BuildContext context, Object error) {
   );
 }
 
+void showInfoSnack(BuildContext context, String text) {
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(
+        content: Text(text, style: const TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFF334155),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+}
+
 class ChatAvatar extends StatelessWidget {
   const ChatAvatar({
     super.key,

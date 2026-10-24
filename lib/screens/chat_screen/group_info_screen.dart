@@ -36,8 +36,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   late Conversation _conv;
   bool _busy = false;
   String get _me => widget.currentUserId;
-  bool get _isOwner => _conv.ownerId == _me;
-  bool get _canManage => _conv.ownerId == null || _conv.ownerId == _me;
+  bool get _canManage => _conv.adminId == null || _conv.adminId == _me;
 
   @override
   void initState() {
@@ -63,7 +62,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     } catch (e) {
       if (mounted) {
         final denied = e is ApiException && e.statusCode == 403;
-        showErrorSnack(context, denied ? 'Only the group owner can do this' : errorText(e));
+        showErrorSnack(context, denied ? 'Only the group admin can do this' : errorText(e));
       }
       return false;
     } finally {
@@ -101,8 +100,10 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         actionLabel: 'Save',
       ),
     );
-    if (name == null || name.isEmpty || name == _conv.groupTitle) return;
-    await _run(() => _repo.updateGroup(_conv.id, name: name));
+    if (name == null) return;
+    final clean = cleanGroupName(name);
+    if (clean.isEmpty || clean == _conv.groupTitle) return;
+    await _run(() => _repo.updateGroup(_conv.id, name: clean));
   }
 
   Future<void> _changeAvatar() async {
@@ -167,62 +168,14 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     await _run(() => _repo.removeParticipant(_conv.id, u.id));
   }
 
-  Future<void> _makeOwner(ChatUser u) async {
-    final ok = await _confirm('Transfer ownership',
-        '${u.name} will become the group owner and you will lose owner controls.', 'Transfer');
-    if (!ok || !mounted) return;
-    await _run(() => _repo.transferOwnership(_conv.id, u.id));
-  }
-
-  Future<ChatUser?> _pickNewOwner() {
-    return showDialog<ChatUser>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        backgroundColor: AppColors.surface,
-        title: const Text('Choose a new owner', style: TextStyle(color: AppColors.textPrimary)),
-        children: _conv.members
-            .where((u) => u.id != _me)
-            .map(
-              (u) => SimpleDialogOption(
-                onPressed: () => Navigator.pop(ctx, u),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(u.name, style: const TextStyle(color: AppColors.textPrimary)),
-                    if (u.email != null && u.email!.isNotEmpty)
-                      Text(u.email!, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-                  ],
-                ),
-              ),
-            )
-            .toList(),
-      ),
-    );
-  }
-
   Future<void> _leave() async {
     final ok = await _confirm('Leave group',
         'You will no longer receive messages from this group.', 'Leave');
     if (!ok || !mounted) return;
 
-    ChatUser? newOwner;
-    if (_isOwner) {
-      final others = _conv.members.where((u) => u.id != _me);
-      if (others.isEmpty) {
-        showErrorSnack(context,
-            'Add another member and transfer ownership before leaving');
-        return;
-      }
-      newOwner = await _pickNewOwner();
-      if (newOwner == null || !mounted) return;
-    }
-
     setState(() => _busy = true);
     widget.onLeaving?.call(true);
     try {
-      if (newOwner != null) {
-        await _repo.transferOwnership(_conv.id, newOwner.id);
-      }
       await _repo.removeParticipant(_conv.id, _me);
       if (!mounted) return;
       Navigator.of(context).popUntil((r) => r.isFirst);
@@ -234,13 +187,13 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     }
   }
 
-  Widget _ownerChip() => Container(
+  Widget _adminChip() => Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         decoration: BoxDecoration(
           color: AppColors.primary.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(10),
         ),
-        child: const Text('Owner',
+        child: const Text('Admin',
             style: TextStyle(
                 color: AppColors.primaryLight,
                 fontSize: 11,
@@ -249,24 +202,20 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
   Widget _memberTile(ChatUser u) {
     final isMe = u.id == _me;
-    final isOwnerRow = u.id == _conv.ownerId;
+    final isAdminRow = u.id == _conv.adminId;
     final email = u.email;
 
     Widget? trailing;
-    if (isOwnerRow) {
-      trailing = _ownerChip();
+    if (isAdminRow) {
+      trailing = _adminChip();
     } else if (_canManage && !isMe) {
       trailing = PopupMenuButton<String>(
         color: AppColors.surface,
         icon: const Icon(Icons.more_vert, color: AppColors.textSecondary),
         onSelected: (v) {
-          if (v == 'owner') _makeOwner(u);
           if (v == 'remove') _remove(u);
         },
         itemBuilder: (_) => const [
-          PopupMenuItem(
-              value: 'owner',
-              child: Text('Make owner', style: TextStyle(color: AppColors.textPrimary))),
           PopupMenuItem(
               value: 'remove',
               child: Text('Remove', style: TextStyle(color: Colors.redAccent))),
