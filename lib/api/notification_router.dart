@@ -48,7 +48,9 @@ class NotificationRouter {
         case NotificationType.communityPostComment:
           await _openCommunity(nav, s('communityId'), postId: s('postId'));
         case NotificationType.communityInvite:
-          if (s('token').isNotEmpty) {
+          if (s('inviteId').isNotEmpty) {
+            await _respondToInvite(nav, s('inviteId'), s('communityId'), s('communityName'));
+          } else if (s('token').isNotEmpty) {
             await _joinCommunityInvite(nav, s('token'));
           } else {
             await _openCommunity(nav, s('communityId'));
@@ -112,6 +114,56 @@ class NotificationRouter {
         ),
       ));
     }
+  }
+
+  static Future<void> _respondToInvite(
+    NavigatorState nav,
+    String inviteId,
+    String communityId,
+    String communityName,
+  ) async {
+    final ctx = appNavigatorKey.currentContext;
+    if (ctx == null) return;
+    final repo = CommunityRepository.instance;
+    final label = communityName.isEmpty ? 'this community' : communityName;
+    final choice = await showDialog<String>(
+      context: ctx,
+      builder: (c) => AlertDialog(
+        backgroundColor: const Color(0xFF14151F),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Join $label?', style: const TextStyle(color: Colors.white)),
+        content: const Text(
+          'You have been invited to join this community.',
+          style: TextStyle(color: Color(0xFF9EA3AE)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, 'later'),
+            child: const Text('Later', style: TextStyle(color: Color(0xFF9EA3AE))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c, 'decline'),
+            child: const Text('Decline', style: TextStyle(color: Colors.redAccent)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c, 'accept'),
+            child: const Text('Accept', style: TextStyle(color: Color(0xFF7F77FF))),
+          ),
+        ],
+      ),
+    );
+    if (choice == 'decline') {
+      await repo.declineInvite(inviteId);
+      _snack('Invitation declined.');
+      return;
+    }
+    if (choice != 'accept') return;
+    await repo.acceptInvite(inviteId);
+    if (communityId.isEmpty) {
+      _snack('You joined $label.');
+      return;
+    }
+    await _openCommunity(nav, communityId);
   }
 
   static Future<void> _joinCommunityInvite(NavigatorState nav, String token) async {
