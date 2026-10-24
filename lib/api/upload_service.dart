@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:quorum_app/api/api_client.dart';
 import 'package:quorum_app/api/api_exception.dart';
@@ -16,6 +17,23 @@ class UploadService {
   static const _imageExt = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'bmp'};
   static const _videoExt = {'mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v', '3gp'};
   static const _audioExt = {'mp3', 'wav', 'm4a', 'aac', 'ogg', 'opus', 'flac'};
+  static const int maxImageBytes = 10 * 1024 * 1024;
+  static const int maxFileBytes = 25 * 1024 * 1024;
+  static int limitFor(String fileType) => fileType == 'image' ? maxImageBytes : maxFileBytes;
+  static String limitMessage(String fileType) => fileType == 'image' ? 'Images can be 10 MB at most. Please choose a smaller image.' : 'Files can be 25 MB at most. Please choose a smaller file.';
+
+  static String? checkSize(String fileName, int bytes) {
+    final type = fileTypeFor(fileName);
+    if (bytes <= limitFor(type)) return null;
+    return limitMessage(type);
+  }
+
+  static Future<void> ensureWithinLimit(String path, String fileName) async {
+    final message = checkSize(fileName, await File(path).length());
+    if (message != null) throw ApiException(message);
+  }
+
+  static String postFileType(String fileType) => fileType == 'file' ? 'document' : fileType;
 
   static String fileTypeFor(String name) {
     final dot = name.lastIndexOf('.');
@@ -50,6 +68,7 @@ class UploadService {
     String folder = 'chat_attachments',
     void Function(double progress)? onProgress,
   }) async {
+    await ensureWithinLimit(path, fileName);
     try {
       final signRes = await ApiClient.instance.dio.post('/api/uploads/sign', data: {'folder': folder});
       final raw = signRes.data['data'] ?? signRes.data;
