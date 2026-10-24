@@ -7,10 +7,12 @@ import 'package:quorum_app/api/community_repository.dart';
 import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/saved_items_repository.dart';
 import 'package:quorum_app/api/saved_items_store.dart';
+import 'package:quorum_app/models/community_models.dart';
 import 'package:quorum_app/models/saved_item_models.dart';
 import 'package:quorum_app/screens/chat_screen/attachment_widgets.dart';
 import 'package:quorum_app/screens/chat_screen/chat_room_screen.dart';
 import 'package:quorum_app/screens/community_screen/communtiy_details_screen.dart';
+import 'package:quorum_app/screens/community_screen/post_comments_screen.dart';
 import 'package:quorum_app/screens/organization_screen/organization_widgets.dart';
 
 class SavedItemsScreen extends StatefulWidget {
@@ -380,6 +382,7 @@ class _SavedItemsScreenState extends State<SavedItemsScreen> {
                 conversation: conv,
                 currentUserId: CurrentUser.id,
                 currentUserName: CurrentUser.name,
+                initialMessageId: item.type == SavedItemType.message ? item.itemId : null,
               ),
             ),
           );
@@ -388,22 +391,54 @@ class _SavedItemsScreenState extends State<SavedItemsScreen> {
           final communityId = s('communityId');
           if (communityId.isNotEmpty) {
             final detail = await CommunityRepository.instance.detail(communityId);
+            CommunityPost? post;
+            try {
+              post = await CommunityRepository.instance.getPost(item.itemId);
+            } catch (_) {}
+            post ??= _postFromSaved(item);
             if (!mounted) return;
-            await Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => CommunityDetailScreen(
-                  communityId: communityId,
-                  initialName: detail.name,
-                  initialRole: detail.role,
+            if (post != null) {
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => PostCommentsScreen(
+                    post: post!,
+                    myId: CurrentUser.id,
+                    role: detail.role,
+                    onCountChanged: (_) {},
+                  ),
                 ),
-              ),
-            );
+              );
+            } else {
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => CommunityDetailScreen(
+                    communityId: communityId,
+                    initialName: detail.name,
+                    initialRole: detail.role,
+                  ),
+                ),
+              );
+            }
           } else if (s('fileUrl').isNotEmpty) {
             await launchUrl(Uri.parse(s('fileUrl')), mode: LaunchMode.externalApplication);
           }
       }
     } catch (e) {
       if (mounted) orgToast(context, errorText(e), error: true);
+    }
+  }
+
+  CommunityPost? _postFromSaved(SavedItem item) {
+    final c = item.content;
+    if (c == null) return null;
+    try {
+      return CommunityPost.fromJson({
+        ...c,
+        'id': item.itemId,
+        'communityId': (c['communityId'] ?? '').toString(),
+      });
+    } catch (_) {
+      return null;
     }
   }
 
