@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/api/socket_service.dart';
 import 'package:quorum_app/api/upload_service.dart';
+import 'package:quorum_app/models/chat_models.dart' show TeamConversations;
 import 'package:quorum_app/models/organization_models.dart';
 import 'package:quorum_app/screens/chat_screen/attachment_widgets.dart';
 import 'organization_widgets.dart';
@@ -36,12 +38,19 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
   final _scroll = ScrollController();
 
   List<TeamMessage> _messages = [];
+  List<OrgMember> _teamMembers = [];
+  bool _teamMembersLoaded = false;
   String? _conversationId;
   bool _loading = true;
   String? _error;
   String _mentionQuery = '';
   bool _mentionActive = false;
   int _tempCounter = 0;
+  Timer? _poller;
+  bool _syncing = false;
+
+  int get _memberCount => _teamMembersLoaded ? _teamMembers.length : widget.team.membersCount;
+  List<OrgMember> get _mentionPool => _teamMembers.isNotEmpty ? _teamMembers : widget.members;
 
   bool get _isLead => orgCanInvite(widget.organization.role);
   String get _me => CurrentUser.id;
@@ -50,18 +59,44 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
   void initState() {
     super.initState();
     _socket.on('chat:message:new', _onSocketMessage);
+    _socket.on('message:new', _onGenericMessage);
+    _socket.on('connect', _onReconnect);
     _input.addListener(_onInputChanged);
     _load();
+    _loadTeamMembers();
+    _poller = Timer.periodic(const Duration(seconds: 3), (_) {
+      _sync();
+      _loadTeamMembers();
+    });
   }
 
   @override
   void dispose() {
+    _poller?.cancel();
     _socket.off('chat:message:new', _onSocketMessage);
+    _socket.off('message:new', _onGenericMessage);
+    _socket.off('connect', _onReconnect);
     final id = _conversationId;
     if (id != null) _socket.leaveTeamRoom(id);
     _input.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadTeamMembers() async {
+    try {
+      final people = await _repo.teamMembers(widget.organization.id, widget.team.id);
+      if (!mounted) return;
+      final changed = !_teamMembersLoaded ||
+          people.length != _teamMembers.length ||
+          people.map((m) => m.userId).join(',') != _teamMembers.map((m) => m.userId).join(',');
+      if (changed) {
+        setState(() {
+          _teamMembers = people;
+          _teamMembersLoaded = true;
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _load() async {
@@ -73,6 +108,9 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
       final history = await _repo.teamMessages(widget.organization.id, widget.team.id);
       if (!mounted) return;
       final pending = _messages.where((m) => m.isPending).toList();
+      if (history.conversationId.isNotEmpty) {
+        TeamConversations.ids.add(history.conversationId);
+      }
       setState(() {
         _conversationId = history.conversationId;
         _messages = [...history.messages, ...pending];
@@ -91,12 +129,70 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
     }
   }
 
-  void _onSocketMessage(dynamic raw) {
+  void _onReconnect(dynamic _) {
+    final id = _conversationId;
+    if (id != null && id.isNotEmpty) _socket.joinTeamRoom(id);
+    _sync();
+  }
+
+  bool _sameList(List<TeamMessage> a, List<TeamMessage> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id || a[i].isPinned != b[i].isPinned || a[i].status != b[i].status) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Future<void> _sync() async {
+    if (_syncing || !mounted || _loading || _conversationId == null) return;
+    _syncing = true;
+    try {
+      final history = await _repo.teamMessages(widget.organization.id, widget.team.id);
+      if (!mounted) return;
+      final pending = _messages.where((m) {
+        if (!m.isPending) return false;
+        final duplicated = history.messages.any((s) =>
+            s.senderId == m.senderId &&
+            s.content == m.content &&
+            s.fileName == m.fileName &&
+            !s.createdAt.isBefore(m.createdAt.subtract(const Duration(minutes: 1))));
+        return !duplicated;
+      }).toList();
+      final next = [...history.messages, ...pending];
+      final current = _messages;
+      if (_sameList(current, next)) return;
+      final grew = next.length > current.length;
+      setState(() => _messages = next);
+      if (grew) _scrollToNewest();
+    } catch (_) {
+    } finally {
+      _syncing = false;
+    }
+  }
+
+  void _onGenericMessage(dynamic raw) {
     final map = asMap(raw);
+    if (map == null) return;
+    final inner = map['message'];
+    final source = inner is Map ? Map<String, dynamic>.from(inner) : map;
+    if (source['conversationId'] == null) return;
+    _onSocketMessage(raw);
+  }
+
+  void _onSocketMessage(dynamic raw) {
+    var map = asMap(raw);
     if (map == null || !mounted) return;
+    final inner = map['message'];
+    if (inner is Map) map = Map<String, dynamic>.from(inner);
     final message = TeamMessage.fromJson(map, fallbackConversationId: _conversationId);
     if (_conversationId != null && message.conversationId != _conversationId) return;
     if (_messages.any((m) => m.id == message.id)) return;
+    if (message.sender == null && message.senderId != null) {
+      _sync();
+      return;
+    }
     if (message.senderId == _me &&
         _messages.any((m) => m.isPending && m.content == message.content && m.senderId == _me)) {
       return;
@@ -129,7 +225,7 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
       }
     }
     final seen = <String>{};
-    for (final member in widget.members) {
+    for (final member in _mentionPool) {
       if (member.userId == _me) continue;
       final first = member.name.trim().split(RegExp(r'\s+')).first;
       if (first.isEmpty) continue;
@@ -199,7 +295,7 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
   }
 
   TeamMessage _tempMessage({required String content, String? localPath, String? fileName, int? fileSize}) {
-    final me = widget.members.where((m) => m.userId == _me);
+    final me = _mentionPool.where((m) => m.userId == _me);
     final name = me.isNotEmpty ? me.first.name : 'You';
     return TeamMessage(
       id: _tempId(),
@@ -334,6 +430,7 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
         name = x?.name;
       }
       if (path == null || name == null) return;
+      await UploadService.ensureWithinLimit(path, name);
       final size = await File(path).length();
       final caption = _input.text.trim();
       _input.clear();
@@ -528,16 +625,13 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
               style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
             ),
             Text(
-              '${widget.team.membersCount} ${widget.team.membersCount == 1 ? 'member' : 'members'} · ${widget.organization.name}',
+              '$_memberCount ${_memberCount == 1 ? 'member' : 'members'} · ${widget.organization.name}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 12, color: orgMuted),
             ),
           ],
         ),
-        actions: [
-          IconButton(onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh_rounded)),
-        ],
       ),
       body: Column(
         children: [

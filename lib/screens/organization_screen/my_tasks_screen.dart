@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/organization_repository.dart';
@@ -18,12 +19,27 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
   List<TeamTask> _tasks = [];
   bool _loading = true;
   String? _error;
+  Timer? _poller;
+  int _inFlight = 0;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _poller = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (!_loading && _inFlight == 0) _load(silent: true);
+    });
   }
+
+  @override
+  void dispose() {
+    _poller?.cancel();
+    super.dispose();
+  }
+
+  String _signature(List<TeamTask> tasks) => tasks
+      .map((t) => '${t.id}|${t.status.name}|${t.title}|${t.assigneeId}|${t.dueDate?.millisecondsSinceEpoch}')
+      .join(';');
 
   Future<void> _load({bool silent = false}) async {
     if (!silent) {
@@ -35,6 +51,8 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
     try {
       final tasks = await _repo.myTasks(widget.organization.id);
       if (!mounted) return;
+      if (silent && _inFlight > 0) return;
+      if (silent && !_loading && _error == null && _signature(tasks) == _signature(_tasks)) return;
       setState(() {
         _tasks = tasks;
         _loading = false;
@@ -51,6 +69,7 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
 
   Future<void> _changeStatus(TeamTask task, TaskStatus status) async {
     final previous = task.status;
+    _inFlight++;
     setState(() {
       _tasks = [for (final t in _tasks) t.id == task.id ? t.copyWith(status: status) : t];
     });
@@ -61,11 +80,13 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
         task.id,
         status,
       );
+      _inFlight--;
       if (!mounted) return;
       setState(() {
         _tasks = [for (final t in _tasks) t.id == task.id ? t.copyWith(status: confirmed) : t];
       });
     } catch (e) {
+      _inFlight--;
       if (!mounted) return;
       setState(() {
         _tasks = [for (final t in _tasks) t.id == task.id ? t.copyWith(status: previous) : t];
@@ -89,9 +110,6 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
             Text(widget.organization.name, style: const TextStyle(fontSize: 12, color: orgMuted)),
           ],
         ),
-        actions: [
-          IconButton(onPressed: _loading ? null : () => _load(), icon: const Icon(Icons.refresh_rounded)),
-        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: orgTeal))

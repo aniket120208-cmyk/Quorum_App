@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/current_user.dart';
@@ -24,14 +25,42 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
   List<OrgTeam> _teams = const [];
   bool _loading = true;
   String? _error;
+  Timer? _poller;
+  bool _fetching = false;
+  bool _queued = false;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _poller = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!_loading) _load();
+    });
+  }
+
+  @override
+  void dispose() {
+    _poller?.cancel();
+    super.dispose();
+  }
+
+  Future<List<OrgTeam>> _teamsWithCounts(List<OrgTeam> teams) {
+    return Future.wait(teams.map((team) async {
+      try {
+        final people = await _repo.teamMembers(_org.id, team.id);
+        return team.copyWith(membersCount: people.length);
+      } catch (_) {
+        return team;
+      }
+    }));
   }
 
   Future<void> _load() async {
+    if (_fetching) {
+      _queued = true;
+      return;
+    }
+    _fetching = true;
     try {
       final results = await Future.wait<Object>([
         _repo.detail(_org.id, role: _org.role),
@@ -41,9 +70,11 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
       if (!mounted) return;
       var org = results[0] as Organization;
       final members = results[1] as List<OrgMember>;
-      final teams = results[2] as List<OrgTeam>;
+      final teams = await _teamsWithCounts(results[2] as List<OrgTeam>);
+      if (!mounted) return;
       final mine = members.where((m) => m.userId.isNotEmpty && m.userId == CurrentUser.id);
       if (mine.isNotEmpty) org = org.copyWith(role: mine.first.role);
+      org = org.copyWith(membersCount: members.length, teamsCount: teams.length);
       setState(() {
         _org = org;
         _members = members;
@@ -60,8 +91,14 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
       }
       setState(() {
         _loading = false;
-        _error = errorText(e);
+        if (_members.isEmpty && _teams.isEmpty) _error = errorText(e);
       });
+    } finally {
+      _fetching = false;
+      if (_queued && mounted) {
+        _queued = false;
+        _load();
+      }
     }
   }
 

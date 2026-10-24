@@ -45,15 +45,15 @@ class Organization {
     this.createdAt,
   });
 
-  Organization copyWith({String? role}) => Organization(
+  Organization copyWith({String? role, int? membersCount, int? teamsCount}) => Organization(
         id: id,
         name: name,
         slug: slug,
         description: description,
         logo: logo,
         role: role ?? this.role,
-        membersCount: membersCount,
-        teamsCount: teamsCount,
+        membersCount: membersCount ?? this.membersCount,
+        teamsCount: teamsCount ?? this.teamsCount,
         createdAt: createdAt,
       );
 
@@ -123,6 +123,14 @@ class OrgTeam {
     required this.membersCount,
     this.createdAt,
   });
+
+  OrgTeam copyWith({int? membersCount}) => OrgTeam(
+        id: id,
+        name: name,
+        description: description,
+        membersCount: membersCount ?? this.membersCount,
+        createdAt: createdAt,
+      );
 
   factory OrgTeam.fromJson(Map<String, dynamic> j) {
     final count = _asMap(j['_count']);

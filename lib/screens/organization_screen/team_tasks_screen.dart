@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/current_user.dart';
@@ -21,6 +22,8 @@ class _TeamTasksScreenState extends State<TeamTasksScreen> {
   List<TeamTask> _tasks = [];
   bool _loading = true;
   String? _error;
+  Timer? _poller;
+  int _inFlight = 0;
 
   bool get _canCreate => orgCanInvite(widget.organization.role);
 
@@ -28,7 +31,20 @@ class _TeamTasksScreenState extends State<TeamTasksScreen> {
   void initState() {
     super.initState();
     _load();
+    _poller = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (!_loading && _inFlight == 0) _load(silent: true);
+    });
   }
+
+  @override
+  void dispose() {
+    _poller?.cancel();
+    super.dispose();
+  }
+
+  String _signature(List<TeamTask> tasks) => tasks
+      .map((t) => '${t.id}|${t.status.name}|${t.title}|${t.assigneeId}|${t.dueDate?.millisecondsSinceEpoch}')
+      .join(';');
 
   Future<void> _load({bool silent = false}) async {
     if (!silent) {
@@ -40,6 +56,8 @@ class _TeamTasksScreenState extends State<TeamTasksScreen> {
     try {
       final tasks = await _repo.teamTasks(widget.organization.id, widget.team.id);
       if (!mounted) return;
+      if (silent && _inFlight > 0) return;
+      if (silent && !_loading && _error == null && _signature(tasks) == _signature(_tasks)) return;
       setState(() {
         _tasks = tasks;
         _loading = false;
@@ -58,6 +76,7 @@ class _TeamTasksScreenState extends State<TeamTasksScreen> {
 
   Future<void> _changeStatus(TeamTask task, TaskStatus status) async {
     final previous = task.status;
+    _inFlight++;
     setState(() {
       _tasks = [for (final t in _tasks) t.id == task.id ? t.copyWith(status: status) : t];
     });
@@ -68,11 +87,13 @@ class _TeamTasksScreenState extends State<TeamTasksScreen> {
         task.id,
         status,
       );
+      _inFlight--;
       if (!mounted) return;
       setState(() {
         _tasks = [for (final t in _tasks) t.id == task.id ? t.copyWith(status: confirmed) : t];
       });
     } catch (e) {
+      _inFlight--;
       if (!mounted) return;
       setState(() {
         _tasks = [for (final t in _tasks) t.id == task.id ? t.copyWith(status: previous) : t];
@@ -111,9 +132,6 @@ class _TeamTasksScreenState extends State<TeamTasksScreen> {
               Text(widget.team.name, style: const TextStyle(fontSize: 12, color: orgMuted)),
             ],
           ),
-          actions: [
-            IconButton(onPressed: _loading ? null : () => _load(), icon: const Icon(Icons.refresh_rounded)),
-          ],
           bottom: TabBar(
             indicatorColor: orgTeal,
             labelColor: Colors.white,
