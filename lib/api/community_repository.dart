@@ -103,8 +103,20 @@ class CommunityRepository {
       });
 
   Future<InviteLink> createInvite(String id, int expiresInDays) => _guard(() async {
-        final r = await _dio.post('/api/communities/$id/invites', data: {'expiresInDays': expiresInDays});
+        final r = await _dio.post('/api/communities/$id/invites', data: {'expiresInHours': expiresInDays * 24});
         return InviteLink.fromJson(_map(_data(r)));
+      });
+
+  Future<void> inviteUser(String id, String userId) => _guard(() async {
+        await _dio.post('/api/communities/$id/invites', data: {'invitedUserId': userId});
+      });
+
+  Future<void> acceptInvite(String inviteId) => _guard(() async {
+        await _dio.post('/api/communities/invites/$inviteId/accept');
+      });
+
+  Future<void> declineInvite(String inviteId) => _guard(() async {
+        await _dio.post('/api/communities/invites/$inviteId/decline');
       });
 
   Future<InvitePreview> previewInvite(String token) => _guard(() async {
@@ -113,7 +125,7 @@ class CommunityRepository {
       });
 
   Future<Community> joinInvite(String token) => _guard(() async {
-        final r = await _dio.post('/api/communities/invites/$token/join');
+        final r = await _dio.post('/api/communities/join/$token');
         return Community.fromJson(_map(_data(r)));
       });
 
@@ -132,8 +144,78 @@ class CommunityRepository {
         return _page(_data(r), 'posts', CommunityPost.fromJson);
       });
 
-  Future<CommunityPost> createPost(String id, String content) => _guard(() async {
-        final r = await _dio.post('/api/communities/$id/posts', data: {'content': content});
+  Future<List<CommunityChannel>> channels(String communityId) => _guard(() async {
+        final r = await _dio.get('/api/communities/$communityId/channels');
+        return _list(_data(r), 'channels').map((e) => CommunityChannel.fromJson(_map(e))).toList();
+      });
+
+  Future<CommunityChannel> createChannel(String communityId, String name, String description) =>
+      _guard(() async {
+        final r = await _dio.post('/api/communities/$communityId/channels', data: {
+          'name': name,
+          if (description.isNotEmpty) 'description': description,
+        });
+        return CommunityChannel.fromJson(_map(_data(r)));
+      });
+
+  Future<void> updateChannel(String communityId, String channelId,
+          {required String name, required String description}) =>
+      _guard(() async {
+        await _dio.patch('/api/communities/$communityId/channels/$channelId', data: {
+          'name': name,
+          'description': description,
+        });
+      });
+
+  Future<void> deleteChannel(String communityId, String channelId) => _guard(() async {
+        await _dio.delete('/api/communities/$communityId/channels/$channelId');
+      });
+
+  Future<PageResult<CommunityPost>> channelPosts(String communityId, String channelId,
+          {String? cursor, int limit = 20}) =>
+      _guard(() async {
+        final page = int.tryParse(cursor ?? '') ?? 1;
+        final r = await _dio.get(
+          '/api/communities/$communityId/channels/$channelId/posts',
+          queryParameters: {'page': page, 'limit': limit},
+        );
+        final d = _data(r);
+        final items = _list(d, 'posts').map((e) => CommunityPost.fromJson(_map(e))).toList();
+        final top = r.data is Map ? r.data as Map : const {};
+        final Map meta = top['pagination'] is Map
+            ? top['pagination'] as Map
+            : (d is Map && d['pagination'] is Map ? d['pagination'] as Map : (d is Map ? d : const {}));
+        final totalPages = int.tryParse('${meta['totalPages'] ?? ''}');
+        final more = meta['hasNextPage'] == true ||
+            meta['hasMore'] == true ||
+            (totalPages != null ? page < totalPages : items.length >= limit);
+        return PageResult<CommunityPost>(items, more ? '${page + 1}' : null, more);
+      });
+
+  Future<CommunityPost> createChannelPost(
+    String communityId,
+    String channelId,
+    String content, {
+    String? fileUrl,
+    String? fileType,
+  }) =>
+      _guard(() async {
+        final r = await _dio.post('/api/communities/$communityId/channels/$channelId/posts', data: {
+          'content': content,
+          if (fileUrl != null) 'fileUrl': fileUrl,
+          if (fileUrl != null && fileType != null) 'fileType': fileType,
+        });
+        return CommunityPost.fromJson(_map(_data(r)));
+      });
+
+  Future<CommunityPost> createPost(String id, String content,
+          {String? fileUrl, String? fileType}) =>
+      _guard(() async {
+        final r = await _dio.post('/api/communities/$id/posts', data: {
+          'content': content,
+          if (fileUrl != null) 'fileUrl': fileUrl,
+          if (fileUrl != null && fileType != null) 'fileType': fileType,
+        });
         return CommunityPost.fromJson(_map(_data(r)));
       });
 

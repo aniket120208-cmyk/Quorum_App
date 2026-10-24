@@ -118,9 +118,39 @@ class CommunityMember {
       );
 }
 
+class CommunityChannel {
+  final String id;
+  final String communityId;
+  final String name;
+  final String? description;
+  final bool isDefault;
+  final DateTime? createdAt;
+
+  const CommunityChannel({
+    required this.id,
+    required this.communityId,
+    required this.name,
+    this.description,
+    this.isDefault = false,
+    this.createdAt,
+  });
+
+  factory CommunityChannel.fromJson(Map<String, dynamic> j) => CommunityChannel(
+        id: j['id'].toString(),
+        communityId: (j['communityId'] ?? '').toString(),
+        name: (j['name'] ?? '').toString(),
+        description: j['description']?.toString(),
+        isDefault: j['isDefault'] == true,
+        createdAt: _date(j['createdAt']),
+      );
+}
+
 class CommunityPost {
   final String id;
   final String communityId;
+  final String? channelId;
+  final String? fileUrl;
+  final String? fileType;
   final String authorId;
   final String authorName;
   final String? authorAvatar;
@@ -132,6 +162,9 @@ class CommunityPost {
   const CommunityPost({
     required this.id,
     required this.communityId,
+    this.channelId,
+    this.fileUrl,
+    this.fileType,
     required this.authorId,
     required this.authorName,
     this.authorAvatar,
@@ -143,10 +176,33 @@ class CommunityPost {
 
   bool get edited => updatedAt.difference(createdAt).inSeconds > 1;
 
-  CommunityPost copyWith({String? content, DateTime? updatedAt, int? commentCount}) =>
+  bool get hasAttachment => fileUrl != null && fileUrl!.isNotEmpty;
+
+  bool get isImage => hasAttachment && fileType == 'image';
+
+  bool get isDocument => hasAttachment && (fileType == 'document' || fileType == 'file');
+
+  String get attachmentName {
+    final u = fileUrl;
+    if (u == null || u.isEmpty) return 'File';
+    final segments = Uri.tryParse(u)?.pathSegments;
+    if (segments == null || segments.isEmpty) return 'File';
+    return Uri.decodeComponent(segments.last);
+  }
+
+  CommunityPost copyWith({
+    String? content,
+    DateTime? updatedAt,
+    int? commentCount,
+    String? fileUrl,
+    String? fileType,
+  }) =>
       CommunityPost(
         id: id,
         communityId: communityId,
+        channelId: channelId,
+        fileUrl: fileUrl ?? this.fileUrl,
+        fileType: fileType ?? this.fileType,
         authorId: authorId,
         authorName: authorName,
         authorAvatar: authorAvatar,
@@ -160,9 +216,15 @@ class CommunityPost {
     final author = j['author'] is Map ? Map<String, dynamic>.from(j['author']) : <String, dynamic>{};
     final counts = j['_count'] is Map ? Map<String, dynamic>.from(j['_count']) : <String, dynamic>{};
     final created = _date(j['createdAt']) ?? DateTime.now();
+    final channel = j['channel'] is Map ? Map<String, dynamic>.from(j['channel']) : <String, dynamic>{};
+    final rawChannelId = (j['channelId'] ?? channel['id'])?.toString();
+    final rawFileUrl = j['fileUrl']?.toString();
     return CommunityPost(
       id: j['id'].toString(),
       communityId: (j['communityId'] ?? '').toString(),
+      channelId: (rawChannelId == null || rawChannelId.isEmpty) ? null : rawChannelId,
+      fileUrl: (rawFileUrl == null || rawFileUrl.isEmpty) ? null : rawFileUrl,
+      fileType: j['fileType']?.toString(),
       authorId: (j['authorId'] ?? author['id'] ?? '').toString(),
       authorName: (author['name'] ?? '').toString(),
       authorAvatar: author['avatar']?.toString(),
