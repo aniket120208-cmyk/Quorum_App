@@ -23,6 +23,7 @@ class SocketService {
   final Set<String> _channelRooms = {};
   final Set<String> _postRooms = {};
   final Map<String, Set<SocketHandler>> _handlers = {};
+  final Set<void Function(bool connected)> _connectionListeners = {};
   bool _refreshing = false;
 
   String? activeConversationId;
@@ -72,6 +73,15 @@ class SocketService {
       for (final id in _postRooms) {
         sock.emit('community:post:join', {'postId': id});
       }
+      for (final l in List.of(_connectionListeners)) {
+        l(true);
+      }
+    });
+
+    sock.onDisconnect((_) {
+      for (final l in List.of(_connectionListeners)) {
+        l(false);
+      }
     });
 
     sock.onConnectError((e) {
@@ -96,6 +106,18 @@ class SocketService {
     } finally {
       _refreshing = false;
     }
+  }
+
+  void addConnectionListener(void Function(bool connected) l) => _connectionListeners.add(l);
+  void removeConnectionListener(void Function(bool connected) l) => _connectionListeners.remove(l);
+
+  Future<bool> waitConnected({Duration timeout = const Duration(seconds: 12)}) async {
+    final deadline = DateTime.now().add(timeout);
+    while (!isConnected) {
+      if (DateTime.now().isAfter(deadline)) return false;
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+    return true;
   }
 
   void on(String event, SocketHandler h) {

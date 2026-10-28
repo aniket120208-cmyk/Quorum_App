@@ -9,6 +9,7 @@ import 'organization_widgets.dart';
 import 'my_tasks_screen.dart';
 import 'team_chat_screen.dart';
 import 'team_tasks_screen.dart';
+import 'package:quorum_app/screens/whiteboard_screen/whiteboard_list_screen.dart';
 
 class OrganizationDetailScreen extends StatefulWidget {
   const OrganizationDetailScreen({super.key, required this.organization});
@@ -163,6 +164,15 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
     );
   }
 
+  Future<void> _openWhiteboards() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WhiteboardListScreen(organization: _org),
+      ),
+    );
+  }
+
   Future<void> _addToTeam(OrgTeam team) async {
     final member = await showOrgSheet<OrgMember>(
       context,
@@ -305,6 +315,20 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
               onPressed: _openMyTasks,
               icon: const Icon(Icons.task_alt_rounded, size: 18, color: orgTeal),
               label: const Text('My tasks', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: orgBorder),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: OutlinedButton.icon(
+              onPressed: _openWhiteboards,
+              icon: const Icon(Icons.draw_rounded, size: 18, color: orgTeal),
+              label: const Text('Whiteboards', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(color: orgBorder),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),

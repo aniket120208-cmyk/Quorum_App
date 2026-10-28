@@ -12,6 +12,8 @@ import 'package:quorum_app/api/meeting_api.dart';
 import 'package:quorum_app/api/meeting_service.dart';
 import 'package:quorum_app/models/meeting_models.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
+import 'package:quorum_app/screens/whiteboard_screen/meeting_whiteboard_sheet.dart';
+import 'package:quorum_app/screens/whiteboard_screen/whiteboard_screen.dart';
 import 'widgets/call_action_button.dart';
 import 'widgets/draggable_pip_view.dart';
 
@@ -305,6 +307,23 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     Share.share('Join my Quorum meeting: $_link');
   }
 
+  Future<void> _openWhiteboard() async {
+    _hideTimer?.cancel();
+    final board = await MeetingWhiteboardSheet.show(context, widget.meetingCode);
+    if (board != null && mounted) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => WhiteboardScreen(
+            boardId: board.id,
+            name: board.name,
+            meetingCode: widget.meetingCode,
+          ),
+        ),
+      );
+    }
+    _showControls();
+  }
+
   Future<void> _showMoreMenu() async {
     _hideTimer?.cancel();
     await showModalBottomSheet<void>(
@@ -329,6 +348,14 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 onTap: () {
                   Navigator.of(ctx).pop();
                   _showParticipants();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.draw_rounded, color: Colors.white),
+                title: const Text('Whiteboard', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _openWhiteboard();
                 },
               ),
               ListTile(
