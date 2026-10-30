@@ -51,6 +51,10 @@ class WhiteboardElement {
   String get text => (json['text'] ?? '').toString();
   double get fontSize => _num(json['fontSize'], 18);
   double get strokeWidth => _num(json['strokeWidth'], 3);
+  double get width => _num(json['width']);
+  double get height => _num(json['height']);
+  Color? get fillColor => parseHexColor(_str(json['fillColor']));
+  bool get isPointBased => type == 'stroke' || type == 'line' || type == 'arrow';
   Color get strokeColor => parseHexColor(_str(json['strokeColor'])) ?? const Color(0xFF0F172A);
   Color get textColor => parseHexColor(_str(json['color'])) ?? const Color(0xFF0F172A);
 
@@ -72,7 +76,7 @@ class WhiteboardElement {
 
   WhiteboardElement translated(double dx, double dy) {
     final next = Map<String, dynamic>.from(json);
-    if (type == 'stroke') {
+    if (isPointBased) {
       next['points'] = points.map((p) => [_round(p.dx + dx), _round(p.dy + dy)]).toList();
     } else if (json.containsKey('x') && json.containsKey('y')) {
       next['x'] = _round(x + dx);

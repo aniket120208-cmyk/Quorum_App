@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:quorum_app/models/whiteboard_models.dart';
 import 'whiteboard_controller.dart';
@@ -23,8 +24,17 @@ class WhiteboardPainter extends CustomPainter {
           _stroke(canvas, el.points, el.strokeColor, el.strokeWidth);
         case 'text':
           layoutText(el).paint(canvas, Offset(el.x, el.y));
+        case 'rectangle':
+        case 'ellipse':
+        case 'diamond':
+        case 'triangle':
+        case 'line':
+        case 'arrow':
+          _shape(canvas, el);
       }
     }
+    final liveShape = controller.liveShape;
+    if (liveShape != null) _shape(canvas, liveShape);
 
     if (controller.livePoints.isNotEmpty) {
       _stroke(canvas, controller.livePoints, controller.color, controller.strokeWidth);
@@ -51,6 +61,64 @@ class WhiteboardPainter extends CustomPainter {
       );
       _cursor(canvas, screen, cursor);
     }
+  }
+
+  void _shape(Canvas canvas, WhiteboardElement el) {
+    final line = Paint()
+      ..color = el.strokeColor
+      ..strokeWidth = el.strokeWidth
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    if (el.type == 'line' || el.type == 'arrow') {
+      final pts = el.points;
+      if (pts.length < 2) return;
+      final a = pts.first;
+      final b = pts.last;
+      canvas.drawLine(a, b, line);
+      if (el.type == 'arrow' && (b - a).distance > 0.5) {
+        final angle = math.atan2(b.dy - a.dy, b.dx - a.dx);
+        final head = math.max(12.0, el.strokeWidth * 4);
+        for (final delta in const [0.5, -0.5]) {
+          canvas.drawLine(
+            b,
+            Offset(b.dx - head * math.cos(angle - delta), b.dy - head * math.sin(angle - delta)),
+            line,
+          );
+        }
+      }
+      return;
+    }
+
+    final rect = Rect.fromLTWH(el.x, el.y, el.width, el.height);
+    final path = Path();
+    switch (el.type) {
+      case 'rectangle':
+        path.addRRect(RRect.fromRectAndRadius(rect, const Radius.circular(4)));
+      case 'ellipse':
+        path.addOval(rect);
+      case 'diamond':
+        path
+          ..moveTo(rect.center.dx, rect.top)
+          ..lineTo(rect.right, rect.center.dy)
+          ..lineTo(rect.center.dx, rect.bottom)
+          ..lineTo(rect.left, rect.center.dy)
+          ..close();
+      case 'triangle':
+        path
+          ..moveTo(rect.center.dx, rect.top)
+          ..lineTo(rect.right, rect.bottom)
+          ..lineTo(rect.left, rect.bottom)
+          ..close();
+      default:
+        return;
+    }
+    final fill = el.fillColor;
+    if (fill != null) {
+      canvas.drawPath(path, Paint()..color = fill.withOpacity(0.28));
+    }
+    canvas.drawPath(path, line);
   }
 
   void _stroke(Canvas canvas, List<Offset> pts, Color color, double width) {

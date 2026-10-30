@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:quorum_app/screens/organization_screen/organization_widgets.dart';
+import 'package:quorum_app/models/whiteboard_models.dart';
 import 'whiteboard_controller.dart';
+import 'whiteboard_emoji.dart';
 import 'whiteboard_painter.dart';
 import 'whiteboard_sheets.dart';
 
@@ -37,17 +39,6 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> {
   double _baseZoom = 1;
   double _baseDistance = 1;
   Offset _anchor = Offset.zero;
-
-  static const _palette = <Color>[
-    Color(0xFF0F172A),
-    Color(0xFFF8FAFC),
-    Color(0xFFEF4444),
-    Color(0xFFF59E0B),
-    Color(0xFF22C55E),
-    Color(0xFF3B82F6),
-    Color(0xFF8B5CF6),
-    Color(0xFFEC4899),
-  ];
 
   static const _widths = <double>[2, 4, 8];
 
@@ -153,8 +144,11 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> {
         _c.eraseAt(p, _tolerance);
       case WhiteboardTool.select:
         _c.beginMove(p, _tolerance);
+      case WhiteboardTool.shape:
+        _c.beginShape(p);
       case WhiteboardTool.pan:
       case WhiteboardTool.text:
+      case WhiteboardTool.emoji:
         break;
     }
   }
@@ -171,7 +165,10 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> {
         _c.moveBy(delta / zoom);
       case WhiteboardTool.pan:
         _c.panBy(delta / zoom);
+      case WhiteboardTool.shape:
+        _c.updateShape(p);
       case WhiteboardTool.text:
+      case WhiteboardTool.emoji:
         break;
     }
   }
@@ -186,17 +183,43 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> {
         _c.endMove();
       case WhiteboardTool.text:
         if (!_moved) _promptText(_toCanvas(screen));
+      case WhiteboardTool.shape:
+        _c.endShape();
+      case WhiteboardTool.emoji:
+        if (!_moved) _c.placeEmoji(_toCanvas(screen));
       case WhiteboardTool.pan:
         break;
     }
   }
 
+  Color get _canvasColor => parseHexColor(_c.viewState.backgroundColor) ?? Colors.white;
+
   Future<void> _promptText(Offset at) async {
-    final text = await showDialog<String>(
-      context: context,
-      builder: (_) => const WhiteboardTextDialog(),
+    final result = await showWhiteboardTextSheet(
+      context,
+      initialColor: _c.color,
+      canvasColor: _canvasColor,
     );
-    if (text != null) _c.addText(at, text);
+    if (result != null) _c.addText(at, result);
+  }
+
+  Future<void> _editSelected() async {
+    final el = _c.selected;
+    if (el == null || el.type != 'text') return;
+    final result = await showWhiteboardTextSheet(
+      context,
+      initialText: el.text,
+      initialSize: el.fontSize,
+      initialColor: el.textColor,
+      canvasColor: _canvasColor,
+      editing: true,
+    );
+    if (result != null) _c.updateText(el.id, result);
+  }
+
+  Future<void> _pickEmoji() async {
+    final emoji = await showWhiteboardEmojiPicker(context, current: _c.emoji);
+    if (emoji != null) _c.setEmoji(emoji);
   }
 
   Future<void> _confirmClear() async {
@@ -251,6 +274,11 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> {
                   tooltip: 'Undo',
                   onPressed: _c.canUndo ? _c.undo : null,
                   icon: const Icon(Icons.undo_rounded),
+                ),
+                IconButton(
+                  tooltip: 'Redo',
+                  onPressed: _c.canRedo ? _c.redo : null,
+                  icon: const Icon(Icons.redo_rounded),
                 ),
                 PopupMenuButton<String>(
                   color: orgCard,
@@ -382,12 +410,219 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 22, color: active ? orgTeal : orgMuted),
+              Icon(icon, size: 21, color: active ? orgTeal : orgMuted),
               const SizedBox(height: 2),
-              Text(label, style: TextStyle(fontSize: 10.5, color: active ? orgTeal : orgMuted)),
+              Text(label, style: TextStyle(fontSize: 10, color: active ? orgTeal : orgMuted)),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  static const _shapeIcons = <ShapeKind, IconData>{
+    ShapeKind.rectangle: Icons.crop_square_rounded,
+    ShapeKind.ellipse: Icons.circle_outlined,
+    ShapeKind.diamond: Icons.diamond_outlined,
+    ShapeKind.triangle: Icons.change_history_rounded,
+    ShapeKind.line: Icons.horizontal_rule_rounded,
+    ShapeKind.arrow: Icons.arrow_right_alt_rounded,
+  };
+
+  Widget _swatches() {
+    return SizedBox(
+      height: 34,
+      child: Row(
+        children: [
+          Expanded(
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final color in whiteboardPalette)
+                  GestureDetector(
+                    onTap: () => _c.setColor(color),
+                    child: Container(
+                      width: 28,
+                      height: 28,
+                      margin: const EdgeInsets.only(right: 8, top: 3, bottom: 3),
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: _c.color.value == color.value ? orgTeal : orgBorder,
+                          width: _c.color.value == color.value ? 2.5 : 1,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          for (final w in _widths)
+            GestureDetector(
+              onTap: () => _c.setStrokeWidth(w),
+              child: Container(
+                width: 34,
+                height: 34,
+                margin: const EdgeInsets.only(left: 4),
+                decoration: BoxDecoration(
+                  color: _c.strokeWidth == w ? const Color(0xFF16302F) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Center(
+                  child: Container(
+                    width: 6 + w * 1.6,
+                    height: 6 + w * 1.6,
+                    decoration: BoxDecoration(
+                      color: _c.strokeWidth == w ? orgTeal : orgMuted,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _shapeRow() {
+    return SizedBox(
+      height: 38,
+      child: Row(
+        children: [
+          Expanded(
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final entry in _shapeIcons.entries)
+                  GestureDetector(
+                    onTap: () => _c.setShape(entry.key),
+                    child: Container(
+                      width: 38,
+                      height: 34,
+                      margin: const EdgeInsets.only(right: 6),
+                      decoration: BoxDecoration(
+                        color: _c.shape == entry.key ? const Color(0xFF16302F) : orgField,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: _c.shape == entry.key ? orgTeal : orgBorder),
+                      ),
+                      child: Icon(
+                        entry.value,
+                        size: 20,
+                        color: _c.shape == entry.key ? orgTeal : orgMuted,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (_c.shape != ShapeKind.line && _c.shape != ShapeKind.arrow)
+            GestureDetector(
+              onTap: () => _c.setFillShapes(!_c.fillShapes),
+              child: Container(
+                height: 34,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: _c.fillShapes ? const Color(0xFF16302F) : orgField,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: _c.fillShapes ? orgTeal : orgBorder),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.format_color_fill_rounded,
+                      size: 17,
+                      color: _c.fillShapes ? orgTeal : orgMuted,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      'Fill',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: _c.fillShapes ? orgTeal : orgMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emojiRow() {
+    return SizedBox(
+      height: 42,
+      child: Row(
+        children: [
+          Expanded(
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final e in whiteboardQuickEmojis)
+                  GestureDetector(
+                    onTap: () => _c.setEmoji(e),
+                    child: Container(
+                      width: 40,
+                      height: 38,
+                      margin: const EdgeInsets.only(right: 6),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: _c.emoji == e ? const Color(0xFF16302F) : orgField,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: _c.emoji == e ? orgTeal : orgBorder),
+                      ),
+                      child: Text(e, style: const TextStyle(fontSize: 20)),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          GestureDetector(
+            onTap: _pickEmoji,
+            child: Container(
+              width: 40,
+              height: 38,
+              decoration: BoxDecoration(
+                color: orgField,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: orgBorder),
+              ),
+              child: const Icon(Icons.grid_view_rounded, size: 19, color: orgTeal),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _selectRow() {
+    final selected = _c.selected;
+    final isText = selected?.type == 'text';
+    return SizedBox(
+      height: 38,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (selected == null)
+            const Text('Tap an item to select it', style: TextStyle(color: orgMuted, fontSize: 13))
+          else ...[
+            if (isText)
+              TextButton.icon(
+                onPressed: _editSelected,
+                icon: const Icon(Icons.edit_rounded, size: 18, color: orgTeal),
+                label: const Text('Edit text', style: TextStyle(color: orgTeal, fontSize: 13)),
+              ),
+            TextButton.icon(
+              onPressed: _c.deleteSelected,
+              icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFEF4444)),
+              label: const Text('Delete', style: TextStyle(color: Color(0xFFEF4444), fontSize: 13)),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -397,6 +632,7 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> {
       animation: _c,
       builder: (context, _) {
         final disabled = _c.status != WhiteboardStatus.ready;
+        final tool = _c.tool;
         return Container(
           decoration: const BoxDecoration(
             color: orgCard,
@@ -409,7 +645,7 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> {
               child: Opacity(
                 opacity: disabled ? 0.5 : 1,
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -420,83 +656,53 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> {
                           _toolButton(WhiteboardTool.pen, Icons.edit_rounded, 'Pen'),
                           _toolButton(WhiteboardTool.eraser, Icons.cleaning_services_outlined, 'Eraser'),
                           _toolButton(WhiteboardTool.text, Icons.text_fields_rounded, 'Text'),
+                          _toolButton(WhiteboardTool.shape, Icons.category_outlined, 'Shapes'),
+                          _toolButton(WhiteboardTool.emoji, Icons.emoji_emotions_outlined, 'Emoji'),
                         ],
                       ),
-                      const SizedBox(height: 8),
-                      if (_c.tool == WhiteboardTool.select)
+                      if (tool == WhiteboardTool.select) ...[
+                        const SizedBox(height: 6),
+                        _selectRow(),
+                      ] else if (tool == WhiteboardTool.pen || tool == WhiteboardTool.text) ...[
+                        const SizedBox(height: 8),
+                        _swatches(),
+                      ] else if (tool == WhiteboardTool.shape) ...[
+                        const SizedBox(height: 8),
+                        _shapeRow(),
+                        const SizedBox(height: 6),
+                        _swatches(),
+                      ] else if (tool == WhiteboardTool.emoji) ...[
+                        const SizedBox(height: 8),
+                        _emojiRow(),
+                        const SizedBox(height: 6),
                         SizedBox(
-                          height: 34,
-                          child: Center(
-                            child: TextButton.icon(
-                              onPressed: _c.selectedId == null ? null : _c.deleteSelected,
-                              icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFEF4444)),
-                              label: Text(
-                                _c.selectedId == null ? 'Tap an item to select it' : 'Delete selected',
-                                style: TextStyle(
-                                  color: _c.selectedId == null ? orgMuted : const Color(0xFFEF4444),
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ),
-                          ),
-                        )
-                      else if (_c.tool == WhiteboardTool.pen || _c.tool == WhiteboardTool.text)
-                        SizedBox(
-                          height: 34,
+                          height: 30,
                           child: Row(
                             children: [
-                              Expanded(
-                                child: ListView(
-                                  scrollDirection: Axis.horizontal,
-                                  children: [
-                                    for (final color in _palette)
-                                      GestureDetector(
-                                        onTap: () => _c.setColor(color),
-                                        child: Container(
-                                          width: 28,
-                                          height: 28,
-                                          margin: const EdgeInsets.only(right: 8, top: 3, bottom: 3),
-                                          decoration: BoxDecoration(
-                                            color: color,
-                                            shape: BoxShape.circle,
-                                            border: Border.all(
-                                              color: _c.color.value == color.value ? orgTeal : orgBorder,
-                                              width: _c.color.value == color.value ? 2.5 : 1,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
+                              const Text('Size', style: TextStyle(color: orgMuted, fontSize: 12.5)),
+                              const Spacer(),
                               for (final w in _widths)
                                 GestureDetector(
                                   onTap: () => _c.setStrokeWidth(w),
                                   child: Container(
                                     width: 34,
-                                    height: 34,
+                                    height: 30,
                                     margin: const EdgeInsets.only(left: 4),
+                                    alignment: Alignment.center,
                                     decoration: BoxDecoration(
                                       color: _c.strokeWidth == w ? const Color(0xFF16302F) : Colors.transparent,
                                       borderRadius: BorderRadius.circular(10),
                                     ),
-                                    child: Center(
-                                      child: Container(
-                                        width: 6 + w * 1.6,
-                                        height: 6 + w * 1.6,
-                                        decoration: BoxDecoration(
-                                          color: _c.strokeWidth == w ? orgTeal : orgMuted,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
+                                    child: Text(
+                                      '😀',
+                                      style: TextStyle(fontSize: 10 + w * 1.5),
                                     ),
                                   ),
                                 ),
                             ],
                           ),
-                        )
-                      else
-                        const SizedBox(height: 34),
+                        ),
+                      ],
                     ],
                   ),
                 ),

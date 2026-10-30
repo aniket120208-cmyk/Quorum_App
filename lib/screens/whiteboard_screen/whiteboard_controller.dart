@@ -6,7 +6,15 @@ import 'package:quorum_app/api/socket_service.dart';
 import 'package:quorum_app/models/whiteboard_models.dart';
 
 enum WhiteboardStatus { joining, ready, error }
-enum WhiteboardTool { pan, select, pen, eraser, text }
+enum WhiteboardTool { pan, select, pen, eraser, text, shape, emoji }
+enum ShapeKind { rectangle, ellipse, diamond, triangle, line, arrow }
+
+class WhiteboardTextResult {
+  const WhiteboardTextResult({required this.text, required this.fontSize, required this.color});
+  final String text;
+  final double fontSize;
+  final Color color;
+}
 
 class _PendingOp {
   _PendingOp(this.event, this.data);
@@ -33,12 +41,14 @@ class WhiteboardController extends ChangeNotifier {
 
   final String boardId;
   final String? meetingCode;
+
   final SocketService _socket = SocketService.instance;
   final Map<String, WhiteboardElement> _elements = {};
   final Map<String, WhiteboardPresence> _users = {};
   final Map<String, RemoteCursor> _cursors = {};
   final List<_PendingOp> _pending = [];
   final List<_UndoAction> _undoStack = [];
+  final List<_UndoAction> _redoStack = [];
   final StreamController<String> _notices = StreamController<String>.broadcast();
 
   List<WhiteboardElement>? _cache;
@@ -56,13 +66,22 @@ class WhiteboardController extends ChangeNotifier {
   Color color = const Color(0xFF0F172A);
   double strokeWidth = 3;
   String? selectedId;
+  ShapeKind shape = ShapeKind.rectangle;
+  bool fillShapes = false;
+  String emoji = '😀';
+
   List<Offset> _livePoints = [];
   List<WhiteboardElement> _erasing = [];
   WhiteboardElement? _moveOrigin;
   Offset _moveDelta = Offset.zero;
+  Offset? _shapeStart;
+  String? _shapeId;
+  WhiteboardElement? liveShape;
+
   Stream<String> get notices => _notices.stream;
   List<Offset> get livePoints => _livePoints;
   bool get canUndo => _undoStack.isNotEmpty;
+  bool get canRedo => _redoStack.isNotEmpty;
   bool get isEmpty => _elements.isEmpty;
   List<WhiteboardPresence> get users => _users.values.toList(growable: false);
   List<RemoteCursor> get cursors => _cursors.values.toList(growable: false);
@@ -336,6 +355,7 @@ class WhiteboardController extends ChangeNotifier {
     _elements.clear();
     selectedId = null;
     _undoStack.clear();
+    _redoStack.clear();
     _touch();
   }
 
@@ -350,6 +370,21 @@ class WhiteboardController extends ChangeNotifier {
   void setTool(WhiteboardTool next) {
     tool = next;
     if (next != WhiteboardTool.select) selectedId = null;
+    _touch();
+  }
+
+  void setShape(ShapeKind next) {
+    shape = next;
+    _touch();
+  }
+
+  void setFillShapes(bool next) {
+    fillShapes = next;
+    _touch();
+  }
+
+  void setEmoji(String next) {
+    emoji = next;
     _touch();
   }
 
@@ -420,8 +455,8 @@ class WhiteboardController extends ChangeNotifier {
     _addLocal(el);
   }
 
-  void addText(Offset p, String text) {
-    final value = text.trim();
+  void addText(Offset p, WhiteboardTextResult result) {
+    final value = result.text.trim();
     if (value.isEmpty) return;
     final el = WhiteboardElement({
       'id': _newId(),
@@ -429,9 +464,110 @@ class WhiteboardController extends ChangeNotifier {
       'x': WhiteboardElement.round(p.dx),
       'y': WhiteboardElement.round(p.dy),
       'text': value,
-      'fontSize': 12 + strokeWidth * 3,
+      'fontSize': result.fontSize,
+      'color': colorToHex(result.color),
+    });
+    _addLocal(el);
+  }
+
+  void updateText(String id, WhiteboardTextResult result) {
+    final old = _elements[id];
+    final value = result.text.trim();
+    if (old == null || old.type != 'text' || value.isEmpty) return;
+    final json = Map<String, dynamic>.from(old.json)
+      ..['text'] = value
+      ..['fontSize'] = result.fontSize
+      ..['color'] = colorToHex(result.color);
+    final next = WhiteboardElement(json);
+    _elements[id] = next;
+    _record(_UndoAction(before: [old], after: [next]));
+    _touch();
+    _emit('whiteboard:elements-change', {
+      'boardId': boardId,
+      'updates': [next.toJson()],
+      'deletes': <String>[],
+    });
+  }
+
+  void placeEmoji(Offset p) {
+    final size = 28 + strokeWidth * 4;
+    final el = WhiteboardElement({
+      'id': _newId(),
+      'type': 'text',
+      'x': WhiteboardElement.round(p.dx - size * 0.6),
+      'y': WhiteboardElement.round(p.dy - size * 0.6),
+      'text': emoji,
+      'fontSize': size,
       'color': colorToHex(color),
     });
+    _addLocal(el);
+  }
+
+  WhiteboardElement _buildShape(String id, Offset a, Offset b) {
+    final hex = colorToHex(color);
+    if (shape == ShapeKind.line || shape == ShapeKind.arrow) {
+      return WhiteboardElement({
+        'id': id,
+        'type': shape.name,
+        'points': [
+          [WhiteboardElement.round(a.dx), WhiteboardElement.round(a.dy)],
+          [WhiteboardElement.round(b.dx), WhiteboardElement.round(b.dy)],
+        ],
+        'strokeColor': hex,
+        'strokeWidth': strokeWidth,
+      });
+    }
+    final rect = Rect.fromPoints(a, b);
+    return WhiteboardElement({
+      'id': id,
+      'type': shape.name,
+      'x': WhiteboardElement.round(rect.left),
+      'y': WhiteboardElement.round(rect.top),
+      'width': WhiteboardElement.round(rect.width),
+      'height': WhiteboardElement.round(rect.height),
+      'strokeColor': hex,
+      'strokeWidth': strokeWidth,
+      'fillColor': fillShapes ? hex : 'transparent',
+    });
+  }
+
+  void beginShape(Offset p) {
+    _shapeStart = p;
+    _shapeId = _newId();
+    liveShape = _buildShape(_shapeId!, p, p);
+    sendCursor(p);
+    _touch();
+  }
+
+  void updateShape(Offset p) {
+    final start = _shapeStart;
+    final id = _shapeId;
+    if (start == null || id == null) return;
+    liveShape = _buildShape(id, start, p);
+    sendCursor(p);
+    _touch();
+  }
+
+  void endShape() {
+    final start = _shapeStart;
+    final id = _shapeId;
+    var el = liveShape;
+    _shapeStart = null;
+    _shapeId = null;
+    liveShape = null;
+    if (start == null || id == null || el == null) {
+      _touch();
+      return;
+    }
+    final isLine = el.type == 'line' || el.type == 'arrow';
+    final minSize = 4 / viewState.zoom;
+    final tiny = isLine
+        ? (el.points.last - el.points.first).distance < minSize
+        : el.width < minSize && el.height < minSize;
+    if (tiny) {
+      final extent = isLine ? const Offset(110, 0) : const Offset(110, 80);
+      el = _buildShape(id, start, start + extent);
+    }
     _addLocal(el);
   }
 
@@ -444,6 +580,9 @@ class WhiteboardController extends ChangeNotifier {
 
   void cancelGesture() {
     _livePoints = [];
+    _shapeStart = null;
+    _shapeId = null;
+    liveShape = null;
     if (_moveOrigin != null) {
       _elements[_moveOrigin!.id] = _moveOrigin!;
       _moveOrigin = null;
@@ -543,21 +682,23 @@ class WhiteboardController extends ChangeNotifier {
   void _record(_UndoAction action) {
     _undoStack.add(action);
     if (_undoStack.length > 50) _undoStack.removeAt(0);
+    _redoStack.clear();
   }
 
-  void undo() {
-    if (_undoStack.isEmpty) return;
-    final action = _undoStack.removeLast();
+  void _applyAction(_UndoAction action, {required bool inverse}) {
+    final toRemove = inverse ? action.added : action.removed;
+    final toAdd = inverse ? action.removed : action.added;
+    final toRestore = inverse ? action.before : action.after;
     final deletes = <String>[];
     final updates = <Map<String, dynamic>>[];
-    for (final el in action.added) {
+    for (final el in toRemove) {
       if (_elements.remove(el.id) != null) deletes.add(el.id);
     }
-    for (final el in action.removed) {
+    for (final el in toAdd) {
       _elements[el.id] = el;
       _emit('whiteboard:draw-element', {'boardId': boardId, 'element': el.toJson()});
     }
-    for (final el in action.before) {
+    for (final el in toRestore) {
       _elements[el.id] = el;
       updates.add(el.toJson());
     }
@@ -568,12 +709,27 @@ class WhiteboardController extends ChangeNotifier {
     }
   }
 
+  void undo() {
+    if (_undoStack.isEmpty) return;
+    final action = _undoStack.removeLast();
+    _redoStack.add(action);
+    _applyAction(action, inverse: true);
+  }
+
+  void redo() {
+    if (_redoStack.isEmpty) return;
+    final action = _redoStack.removeLast();
+    _undoStack.add(action);
+    _applyAction(action, inverse: false);
+  }
+
   void clearAll() {
     if (_elements.isEmpty) return;
     final snapshot = Map<String, WhiteboardElement>.of(_elements);
     _elements.clear();
     selectedId = null;
     _undoStack.clear();
+    _redoStack.clear();
     _touch();
     _emit(
       'whiteboard:clear',
@@ -631,6 +787,8 @@ TextPainter layoutText(WhiteboardElement e) {
 Rect elementBounds(WhiteboardElement e) {
   switch (e.type) {
     case 'stroke':
+    case 'line':
+    case 'arrow':
       final pts = e.points;
       if (pts.isEmpty) return Rect.zero;
       var minX = pts.first.dx, maxX = pts.first.dx, minY = pts.first.dy, maxY = pts.first.dy;
@@ -644,6 +802,11 @@ Rect elementBounds(WhiteboardElement e) {
     case 'text':
       final tp = layoutText(e);
       return Offset(e.x, e.y) & tp.size;
+    case 'rectangle':
+    case 'ellipse':
+    case 'diamond':
+    case 'triangle':
+      return Rect.fromLTWH(e.x, e.y, e.width, e.height).inflate(e.strokeWidth / 2);
     default:
       return Rect.zero;
   }
@@ -653,7 +816,11 @@ bool elementHit(WhiteboardElement e, Offset p, double tolerance) {
   final bounds = elementBounds(e);
   if (bounds == Rect.zero) return false;
   if (!bounds.inflate(tolerance).contains(p)) return false;
-  if (e.type == 'stroke') {
+  if (e.type == 'rectangle' || e.type == 'ellipse' || e.type == 'diamond' || e.type == 'triangle') {
+    if (e.fillColor != null) return true;
+    return !bounds.deflate(tolerance + e.strokeWidth).contains(p);
+  }
+  if (e.isPointBased) {
     final pts = e.points;
     final reach = e.strokeWidth / 2 + tolerance;
     if (pts.length == 1) return (p - pts.first).distance <= reach;
