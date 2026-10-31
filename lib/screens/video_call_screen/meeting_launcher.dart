@@ -16,13 +16,7 @@ class MeetingLauncher {
     if (MeetingApi.isQuorumLink(trimmed)) {
       final code = MeetingApi.codeFromLink(trimmed);
       if (code == null || nav == null) return false;
-      final result = await nav.push<MeetingResult>(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => MeetingRoomScreen(meetingCode: code, title: title),
-        ),
-      );
-      await _record(result);
+      await joinCode(code, title: title);
       return true;
     }
 
@@ -33,6 +27,18 @@ class MeetingLauncher {
     } catch (_) {
       return false;
     }
+  }
+
+  static Future<void> joinCode(String code, {String title = 'Meeting', bool isHost = false}) async {
+    final nav = appNavigatorKey.currentState;
+    if (nav == null) return;
+    final result = await nav.push<MeetingResult>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => MeetingRoomScreen(meetingCode: code, title: title, isHostHint: isHost),
+      ),
+    );
+    await _record(result);
   }
 
   static Future<void> _record(MeetingResult? result) async {

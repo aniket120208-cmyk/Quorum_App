@@ -44,6 +44,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   StreamSubscription<String>? _noticeSub;
   bool _permissionDenied = false;
   bool _checkingMeeting = true;
+  bool _whiteboardAllowed = false;
   bool _mediaReady = false;
   String? _lobbyError;
   _Phase _phase = _Phase.lobby;
@@ -79,6 +80,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
   Future<void> _bootstrap() async {
     bool isHost = widget.isHostHint;
+    bool whiteboardAllowed = false;
     try {
       if (!CurrentUser.isLoaded) {
         CurrentUser.setFromProfile(await AuthService.instance.getUserProfile());
@@ -86,6 +88,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       if (!CurrentUser.isLoaded) throw ApiException('Unable to load your profile.');
       final info = await MeetingApi.instance.getMeeting(widget.meetingCode);
       isHost = isHost || (info.hostId.isNotEmpty && info.hostId == CurrentUser.id);
+      whiteboardAllowed = info.scope != MeetingScope.personal;
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -105,7 +108,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     )..addListener(_onService);
     _svcOrNull = svc;
     _noticeSub = svc.notices.listen(_snack);
-    setState(() => _checkingMeeting = false);
+    setState(() {
+      _checkingMeeting = false;
+      _whiteboardAllowed = whiteboardAllowed;
+    });
 
     final cam = await Permission.camera.request();
     final mic = await Permission.microphone.request();
@@ -134,6 +140,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         if (_phase == _Phase.joining || _phase == _Phase.waiting) {
           _phase = _Phase.lobby;
           if (msg != null) _snack(msg);
+        } else if (_phase == _Phase.inCall) {
+          if (msg != null) _snack(msg);
+          _exit(skipServer: true);
         }
         break;
       case MeetingPhase.rejected:
@@ -166,6 +175,16 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     }
     HapticFeedback.selectionClick();
     _svc.toggleCamera();
+    _showControls();
+  }
+
+  Future<void> _toggleScreenShare() async {
+    HapticFeedback.selectionClick();
+    if (_svc.isScreenSharing) {
+      await _svc.stopScreenShare();
+    } else {
+      await _svc.startScreenShare();
+    }
     _showControls();
   }
 
@@ -351,13 +370,28 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.draw_rounded, color: Colors.white),
-                title: const Text('Whiteboard', style: TextStyle(color: Colors.white)),
+                leading: Icon(
+                  _svc.isScreenSharing ? Icons.stop_screen_share_rounded : Icons.screen_share_rounded,
+                  color: _svc.isScreenSharing ? Colors.redAccent : Colors.white,
+                ),
+                title: Text(
+                  _svc.isScreenSharing ? 'Stop sharing' : 'Share screen',
+                  style: const TextStyle(color: Colors.white),
+                ),
                 onTap: () {
                   Navigator.of(ctx).pop();
-                  _openWhiteboard();
+                  _toggleScreenShare();
                 },
               ),
+              if (_whiteboardAllowed)
+                ListTile(
+                  leading: const Icon(Icons.draw_rounded, color: Colors.white),
+                  title: const Text('Whiteboard', style: TextStyle(color: Colors.white)),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _openWhiteboard();
+                  },
+                ),
               ListTile(
                 leading: const Icon(Icons.ios_share_rounded, color: Colors.white),
                 title: const Text('Share invite link', style: TextStyle(color: Colors.white)),
@@ -939,6 +973,13 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 ),
               ),
             ),
+          if (_svc.isScreenSharing)
+            Positioned(
+              top: pad.top + 64,
+              left: 16,
+              right: 16,
+              child: _sharingBanner(),
+            ),
           Positioned(
             left: 20,
             right: 20,
@@ -1028,6 +1069,38 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  Widget _sharingBanner() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: Colors.redAccent.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.screen_share_rounded, color: Colors.white, size: 18),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'You are sharing your screen',
+              style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          ),
+          TextButton(
+            onPressed: _toggleScreenShare,
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white,
+              backgroundColor: Colors.black.withValues(alpha: 0.25),
+              minimumSize: const Size(56, 34),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Stop', style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1147,7 +1220,20 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           Positioned(
             left: 12,
             bottom: rounded ? 10 : 130,
-            child: Text(p.name, style: const TextStyle(color: Colors.white, fontSize: 13)),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (p.isScreenSharing)
+                  const Padding(
+                    padding: EdgeInsets.only(right: 6),
+                    child: Icon(Icons.screen_share_rounded, color: Colors.white, size: 14),
+                  ),
+                Text(
+                  p.isScreenSharing ? '${p.name} · Sharing screen' : p.name,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                ),
+              ],
+            ),
           ),
           if (p.isMuted)
             Positioned(

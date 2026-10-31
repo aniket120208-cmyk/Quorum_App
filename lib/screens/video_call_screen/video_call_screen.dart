@@ -10,6 +10,9 @@ import 'package:quorum_app/models/notification_models.dart';
 import 'package:quorum_app/screens/home_screen/calendar_helpers.dart';
 import 'package:quorum_app/models/meeting_models.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
+import 'package:quorum_app/screens/meetings_screen/meetings_list_screen.dart';
+import 'package:quorum_app/screens/meetings_screen/schedule_meeting_sheet.dart';
+import 'package:quorum_app/screens/organization_screen/organization_sheets.dart';
 import 'meeting_launcher.dart';
 import 'meeting_room_screen.dart';
 import 'video_call_controller.dart';
@@ -105,6 +108,24 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     } catch (e) {
       _snack(errorText(e));
     }
+  }
+
+  Future<void> _scheduleMeeting() async {
+    final meeting = await showOrgSheet<ScopedMeeting>(context, const ScheduleMeetingSheet());
+    if (meeting == null || !mounted) return;
+    if (meeting.isActive) {
+      _showLinkDialog(
+        CreatedMeeting(code: meeting.code, link: meeting.link ?? MeetingApi.linkFor(meeting.code)),
+      );
+      return;
+    }
+    _snack('Meeting scheduled');
+  }
+
+  void _openUpcoming() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const MeetingsListScreen.upcoming()),
+    );
   }
 
   void _copyLink(String code) {
@@ -341,6 +362,36 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
               ),
             ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: loading ? null : _scheduleMeeting,
+                  icon: const Icon(Icons.event_available_rounded, size: 18, color: Colors.white),
+                  label: const Text('Schedule', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(46),
+                    side: const BorderSide(color: AppColors.surfaceBorder),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _openUpcoming,
+                  icon: const Icon(Icons.event_note_rounded, size: 18, color: Colors.white),
+                  label: const Text('Upcoming', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(46),
+                    side: const BorderSide(color: AppColors.surfaceBorder),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
           const Row(
