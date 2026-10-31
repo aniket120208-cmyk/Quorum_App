@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:quorum_app/models/community_models.dart';
 import 'package:quorum_app/screens/chat_screen/attachment_widgets.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
+import 'package:quorum_app/form_validators.dart';
 
 String timeAgo(DateTime t) {
   final d = DateTime.now().difference(t);
@@ -205,6 +206,7 @@ class CommunityFormDialog extends StatefulWidget {
     this.nameHint = 'Community name',
     this.descriptionHint = 'What is this community about?',
     this.emptyError = 'Give your community a name.',
+    this.enforceLimits = true,
   });
 
   final String title;
@@ -214,6 +216,7 @@ class CommunityFormDialog extends StatefulWidget {
   final String nameHint;
   final String descriptionHint;
   final String emptyError;
+  final bool enforceLimits;
 
   @override
   State<CommunityFormDialog> createState() => _CommunityFormDialogState();
@@ -222,7 +225,8 @@ class CommunityFormDialog extends StatefulWidget {
 class _CommunityFormDialogState extends State<CommunityFormDialog> {
   late final TextEditingController _name = TextEditingController(text: widget.name);
   late final TextEditingController _desc = TextEditingController(text: widget.description);
-  String? _error;
+  String? _nameError;
+  String? _descError;
 
   @override
   void dispose() {
@@ -233,11 +237,25 @@ class _CommunityFormDialogState extends State<CommunityFormDialog> {
 
   void _submit() {
     final name = _name.text.trim();
+    final description = _desc.text.trim();
+    String? nameError;
+    String? descError;
     if (name.isEmpty) {
-      setState(() => _error = widget.emptyError);
+      nameError = widget.emptyError;
+    } else if (widget.enforceLimits) {
+      nameError = FormValidators.communityName(name);
+    }
+    if (widget.enforceLimits) {
+      descError = FormValidators.communityDescription(description);
+    }
+    if (nameError != null || descError != null) {
+      setState(() {
+        _nameError = nameError;
+        _descError = descError;
+      });
       return;
     }
-    Navigator.pop(context, (name, _desc.text.trim()));
+    Navigator.pop(context, (name, description));
   }
 
   @override
@@ -257,6 +275,11 @@ class _CommunityFormDialogState extends State<CommunityFormDialog> {
               style: const TextStyle(color: AppColors.textPrimary),
               decoration: communityFieldDecoration(widget.nameHint),
             ),
+            if (_nameError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(_nameError!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+              ),
             const SizedBox(height: 12),
             TextField(
               controller: _desc,
@@ -266,10 +289,10 @@ class _CommunityFormDialogState extends State<CommunityFormDialog> {
               style: const TextStyle(color: AppColors.textPrimary),
               decoration: communityFieldDecoration(widget.descriptionHint),
             ),
-            if (_error != null)
+            if (_descError != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text(_error!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+                child: Text(_descError!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
               ),
           ],
         ),

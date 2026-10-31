@@ -11,6 +11,7 @@ import 'package:quorum_app/api/socket_service.dart';
 import 'package:quorum_app/api/upload_service.dart';
 import 'package:quorum_app/models/community_models.dart';
 import 'package:quorum_app/models/saved_item_models.dart';
+import 'package:quorum_app/widgets/copyable_id_tile.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
 import 'community_invite_screen.dart';
 import 'community_members_search.dart';
@@ -327,6 +328,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
         nameHint: 'Channel name',
         descriptionHint: 'What is this channel for?',
         emptyError: 'Give the channel a name.',
+        enforceLimits: false,
       ),
     );
     if (result == null || !mounted) return;
@@ -373,6 +375,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
           nameHint: 'Channel name',
           descriptionHint: 'What is this channel for?',
           emptyError: 'Give the channel a name.',
+          enforceLimits: false,
         ),
       );
       if (result == null || !mounted) return;
@@ -769,6 +772,15 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
               ],
             ),
           ],
+          const SizedBox(height: 12),
+          CopyableIdTile(
+            label: 'Community ID',
+            value: _id,
+            labelColor: AppColors.textMuted,
+            valueColor: AppColors.textPrimary,
+            borderColor: AppColors.surfaceBorder,
+            accentColor: AppColors.primary,
+          ),
           const SizedBox(height: 12),
           Row(
             children: [
