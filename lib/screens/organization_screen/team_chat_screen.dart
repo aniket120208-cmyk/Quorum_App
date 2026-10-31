@@ -12,6 +12,8 @@ import 'package:quorum_app/api/socket_service.dart';
 import 'package:quorum_app/api/upload_service.dart';
 import 'package:quorum_app/models/chat_models.dart' show TeamConversations;
 import 'package:quorum_app/models/organization_models.dart';
+import 'package:quorum_app/screens/jira_screen/team_jira_board_screen.dart';
+import 'package:quorum_app/screens/meetings_screen/meetings_list_screen.dart';
 import 'package:quorum_app/screens/chat_screen/attachment_widgets.dart';
 import 'organization_widgets.dart';
 
@@ -606,6 +608,24 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
     );
   }
 
+  void _openMeetings() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MeetingsListScreen.team(organization: widget.organization, team: widget.team),
+      ),
+    );
+  }
+
+  void _openJira() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TeamJiraBoardScreen(organization: widget.organization, team: widget.team),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -615,6 +635,18 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
         elevation: 0,
         foregroundColor: Colors.white,
         titleSpacing: 0,
+        actions: [
+          IconButton(
+            tooltip: 'Team meetings',
+            onPressed: _openMeetings,
+            icon: const Icon(Icons.videocam_outlined),
+          ),
+          IconButton(
+            tooltip: 'Jira tickets',
+            onPressed: _openJira,
+            icon: const Icon(Icons.view_kanban_outlined),
+          ),
+        ],
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

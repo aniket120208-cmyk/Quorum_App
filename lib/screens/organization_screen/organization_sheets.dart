@@ -6,6 +6,7 @@ import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/api/upload_service.dart';
 import 'package:quorum_app/models/organization_models.dart';
 import 'organization_widgets.dart';
+import 'package:quorum_app/form_validators.dart';
 
 Future<T?> showOrgSheet<T>(BuildContext context, Widget child) {
   return showModalBottomSheet<T>(
@@ -49,6 +50,8 @@ class _EditOrganizationSheetState extends State<EditOrganizationSheet> {
   late final _descCtrl = TextEditingController(text: widget.organization.description ?? '');
   String? _logoPath;
   String? _logoName;
+  String? _nameError;
+  String? _descError;
   bool _loading = false;
 
   @override
@@ -74,12 +77,23 @@ class _EditOrganizationSheetState extends State<EditOrganizationSheet> {
   }
 
   Future<void> _save() async {
+    if (_loading) return;
     final name = _nameCtrl.text.trim();
-    if (name.isEmpty) {
-      orgToast(context, 'Organization name is required', error: true);
+    final description = _descCtrl.text.trim();
+    final nameError = name.isEmpty ? 'Organization name is required' : FormValidators.organizationName(name);
+    final descError = FormValidators.organizationDescription(description);
+    if (nameError != null || descError != null) {
+      setState(() {
+        _nameError = nameError;
+        _descError = descError;
+      });
       return;
     }
-    setState(() => _loading = true);
+    setState(() {
+      _nameError = null;
+      _descError = null;
+      _loading = true;
+    });
     try {
       String? logoUrl;
       if (_logoPath != null) {
@@ -89,7 +103,7 @@ class _EditOrganizationSheetState extends State<EditOrganizationSheet> {
       await OrganizationRepository.instance.update(
         widget.organization.id,
         name: name,
-        description: _descCtrl.text.trim(),
+        description: description,
         logo: logoUrl,
       );
       if (!mounted) return;
@@ -123,7 +137,7 @@ class _EditOrganizationSheetState extends State<EditOrganizationSheet> {
             controller: _nameCtrl,
             style: const TextStyle(color: Colors.white),
             textCapitalization: TextCapitalization.words,
-            decoration: orgInputDecoration('Organization name'),
+            decoration: orgInputDecoration('Organization name').copyWith(errorText: _nameError),
           ),
           const SizedBox(height: 14),
           TextField(
@@ -132,7 +146,7 @@ class _EditOrganizationSheetState extends State<EditOrganizationSheet> {
             minLines: 2,
             maxLines: 4,
             textCapitalization: TextCapitalization.sentences,
-            decoration: orgInputDecoration('Description'),
+            decoration: orgInputDecoration('Description').copyWith(errorText: _descError),
           ),
           const SizedBox(height: 22),
           OrgPrimaryButton(label: 'Save changes', loading: _loading, onPressed: _save),

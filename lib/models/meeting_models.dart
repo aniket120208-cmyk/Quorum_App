@@ -13,26 +13,163 @@ class CreatedMeeting {
   const CreatedMeeting({required this.code, required this.link});
 }
 
+enum MeetingScope {
+  personal('PERSONAL', 'Personal'),
+  organization('ORGANIZATION', 'Organization'),
+  team('TEAM', 'Team');
+
+  const MeetingScope(this.value, this.label);
+  final String value;
+  final String label;
+
+  static MeetingScope fromValue(dynamic raw) {
+    final text = (raw ?? '').toString().toUpperCase();
+    return MeetingScope.values.firstWhere((e) => e.value == text, orElse: () => MeetingScope.personal);
+  }
+}
+
+enum MeetingStatus {
+  scheduled,
+  active,
+  ended,
+  cancelled;
+
+  static MeetingStatus fromValue(dynamic raw) {
+    switch ((raw ?? '').toString().toUpperCase()) {
+      case 'SCHEDULED':
+        return MeetingStatus.scheduled;
+      case 'ENDED':
+        return MeetingStatus.ended;
+      case 'CANCELLED':
+        return MeetingStatus.cancelled;
+      default:
+        return MeetingStatus.active;
+    }
+  }
+}
+
+DateTime? _meetingDate(dynamic v) => DateTime.tryParse((v ?? '').toString())?.toLocal();
+
+String? _meetingText(dynamic v) {
+  final s = v?.toString().trim();
+  if (s == null || s.isEmpty || s == 'null') return null;
+  return s;
+}
+
+Map<String, dynamic> _meetingMap(dynamic v) => v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
+
 class MeetingInfo {
   final String code;
   final String hostId;
   final String hostName;
   final bool waitingRoom;
-  
+  final String title;
+  final MeetingScope scope;
+  final MeetingStatus status;
+  final DateTime? scheduledStartTime;
+
   const MeetingInfo({
     required this.code,
     required this.hostId,
     required this.hostName,
     required this.waitingRoom,
+    this.title = 'Meeting',
+    this.scope = MeetingScope.personal,
+    this.status = MeetingStatus.active,
+    this.scheduledStartTime,
   });
 
   factory MeetingInfo.fromJson(Map<String, dynamic> j) {
-    final host = j['host'] is Map ? Map<String, dynamic>.from(j['host']) : const <String, dynamic>{};
+    final host = _meetingMap(j['host']);
     return MeetingInfo(
       code: (j['code'] ?? '').toString(),
       hostId: (j['hostId'] ?? host['id'] ?? '').toString(),
       hostName: (host['name'] ?? '').toString(),
       waitingRoom: j['waitingRoom'] == true,
+      title: _meetingText(j['title']) ?? 'Meeting',
+      scope: MeetingScope.fromValue(j['scopeType']),
+      status: MeetingStatus.fromValue(j['status']),
+      scheduledStartTime: _meetingDate(j['scheduledStartTime']),
+    );
+  }
+}
+
+class ScopedMeeting {
+  static const Duration earlyJoinWindow = Duration(minutes: 15);
+
+  final String code;
+  final String title;
+  final MeetingScope scope;
+  final MeetingStatus status;
+  final DateTime? scheduledStartTime;
+  final String hostId;
+  final String hostName;
+  final String? hostAvatar;
+  final String? organizationId;
+  final String? organizationName;
+  final String? teamId;
+  final String? teamName;
+  final String? link;
+
+  const ScopedMeeting({
+    required this.code,
+    required this.title,
+    required this.scope,
+    required this.status,
+    this.scheduledStartTime,
+    this.hostId = '',
+    this.hostName = '',
+    this.hostAvatar,
+    this.organizationId,
+    this.organizationName,
+    this.teamId,
+    this.teamName,
+    this.link,
+  });
+
+  bool get isScheduled => status == MeetingStatus.scheduled;
+  bool get isActive => status == MeetingStatus.active;
+  bool get isOpen => isScheduled || isActive;
+
+  DateTime? get joinOpensAt => scheduledStartTime?.subtract(earlyJoinWindow);
+
+  String get scopeLabel {
+    switch (scope) {
+      case MeetingScope.personal:
+        return 'Personal';
+      case MeetingScope.organization:
+        return organizationName ?? 'Organization';
+      case MeetingScope.team:
+        return teamName ?? 'Team';
+    }
+  }
+
+  bool canJoin({required bool isHost, DateTime? now}) {
+    if (!isOpen) return false;
+    if (isActive || isHost) return true;
+    final opens = joinOpensAt;
+    if (opens == null) return true;
+    return !(now ?? DateTime.now()).isBefore(opens);
+  }
+
+  factory ScopedMeeting.fromJson(Map<String, dynamic> j) {
+    final host = _meetingMap(j['host']);
+    final organization = _meetingMap(j['organization']);
+    final team = _meetingMap(j['team']);
+    return ScopedMeeting(
+      code: (j['code'] ?? '').toString(),
+      title: _meetingText(j['title']) ?? 'Meeting',
+      scope: MeetingScope.fromValue(j['scopeType']),
+      status: MeetingStatus.fromValue(j['status']),
+      scheduledStartTime: _meetingDate(j['scheduledStartTime']),
+      hostId: (j['hostId'] ?? host['id'] ?? '').toString(),
+      hostName: (host['name'] ?? '').toString(),
+      hostAvatar: _meetingText(host['avatar']),
+      organizationId: _meetingText(j['organizationId'] ?? organization['id']),
+      organizationName: _meetingText(organization['name']),
+      teamId: _meetingText(j['teamId'] ?? team['id']),
+      teamName: _meetingText(team['name']),
+      link: _meetingText(j['link']),
     );
   }
 }
@@ -125,6 +262,7 @@ class RemotePeer {
   bool isVideoOff = false;
   bool hasVideo = false;
   bool fitContain = false;
+  bool isScreenSharing = false;
   final RTCVideoRenderer renderer = RTCVideoRenderer();
   late final Future<void> _ready = renderer.initialize();
   bool _disposed = false;

@@ -4,11 +4,15 @@ import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/models/organization_models.dart';
+import 'package:quorum_app/widgets/copyable_id_tile.dart';
 import 'organization_sheets.dart';
 import 'organization_widgets.dart';
 import 'my_tasks_screen.dart';
 import 'team_chat_screen.dart';
 import 'team_tasks_screen.dart';
+import 'organization_settings_screen.dart';
+import 'package:quorum_app/screens/jira_screen/jira_settings_screen.dart';
+import 'package:quorum_app/screens/meetings_screen/meetings_list_screen.dart';
 import 'package:quorum_app/screens/whiteboard_screen/whiteboard_list_screen.dart';
 
 class OrganizationDetailScreen extends StatefulWidget {
@@ -164,6 +168,34 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
     );
   }
 
+  Future<void> _openSettings() async {
+    final exited = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => OrganizationSettingsScreen(organization: _org),
+      ),
+    );
+    if (exited == true && mounted) Navigator.pop(context);
+  }
+
+  Future<void> _openMeetings() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MeetingsListScreen.organization(organization: _org),
+      ),
+    );
+  }
+
+  Future<void> _openJira() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JiraSettingsScreen(organization: _org),
+      ),
+    );
+  }
+
   Future<void> _openWhiteboards() async {
     await Navigator.push(
       context,
@@ -215,6 +247,12 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
         actions: [
           if (!_loading && _error == null && orgIsAdmin(_org.role))
             IconButton(onPressed: _edit, icon: const Icon(Icons.edit_outlined)),
+          if (!_loading && _error == null)
+            IconButton(
+              tooltip: 'Organization settings',
+              onPressed: _openSettings,
+              icon: const Icon(Icons.settings_outlined),
+            ),
         ],
       ),
       body: _loading
@@ -329,6 +367,34 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
               onPressed: _openWhiteboards,
               icon: const Icon(Icons.draw_rounded, size: 18, color: orgTeal),
               label: const Text('Whiteboards', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: orgBorder),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: OutlinedButton.icon(
+              onPressed: _openJira,
+              icon: const Icon(Icons.view_kanban_outlined, size: 18, color: orgTeal),
+              label: const Text('Jira integration', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: orgBorder),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: OutlinedButton.icon(
+              onPressed: _openMeetings,
+              icon: const Icon(Icons.videocam_outlined, size: 18, color: orgTeal),
+              label: const Text('Meetings', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(color: orgBorder),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -550,6 +616,15 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
               style: const TextStyle(color: orgMuted, fontSize: 12.5, height: 1.4),
             ),
           ],
+          const SizedBox(height: 10),
+          CopyableIdTile(
+            label: 'Team ID',
+            value: team.id,
+            labelColor: orgMuted,
+            valueColor: Colors.white,
+            borderColor: orgBorder,
+            accentColor: orgTeal,
+          ),
         ],
       ),
       ),

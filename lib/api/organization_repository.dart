@@ -86,6 +86,14 @@ class OrganizationRepository {
         });
       });
 
+  Future<void> leave(String id) => _guard(() async {
+        await _dio.post('/api/organizations/$id/leave', data: <String, dynamic>{});
+      });
+
+  Future<void> delete(String id) => _guard(() async {
+        await _dio.delete('/api/organizations/$id');
+      });
+
   Future<List<OrgMember>> members(String id) => _guard(() async {
         final r = await _dio.get('/api/organizations/$id/members');
         return _list(_data(r), 'members').map((e) => OrgMember.fromJson(_map(e))).toList();

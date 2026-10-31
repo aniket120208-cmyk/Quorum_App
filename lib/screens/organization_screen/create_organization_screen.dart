@@ -4,6 +4,7 @@ import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/api/upload_service.dart';
 import 'package:quorum_app/models/organization_models.dart';
 import 'organization_widgets.dart';
+import 'package:quorum_app/form_validators.dart';
 
 class CreateOrganizationScreen extends StatefulWidget {
   const CreateOrganizationScreen({super.key});
@@ -81,6 +82,7 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
           child: Form(
             key: _formKey,
+            autovalidateMode: AutovalidateMode.onUserInteraction,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -101,7 +103,7 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
                   style: const TextStyle(color: Colors.white),
                   textCapitalization: TextCapitalization.words,
                   decoration: orgInputDecoration('Organization name', hint: 'e.g. Acme Corporation'),
-                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Organization name is required' : null,
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Organization name is required' : FormValidators.organizationName(v),
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
@@ -111,6 +113,7 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
                   maxLines: 5,
                   textCapitalization: TextCapitalization.sentences,
                   decoration: orgInputDecoration('Description (optional)', hint: 'What does your organization do?'),
+                  validator: FormValidators.organizationDescription,
                 ),
                 const SizedBox(height: 28),
                 OrgPrimaryButton(label: 'Create organization', loading: _loading, onPressed: _submit),
