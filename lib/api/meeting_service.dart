@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:quorum_app/api/api_client.dart';
+import 'package:quorum_app/api/screen_share_foreground.dart';
 import 'package:quorum_app/api/socket_service.dart' show asMap;
 import 'package:quorum_app/models/meeting_models.dart';
 
@@ -50,6 +51,9 @@ class MeetingService extends ChangeNotifier {
   io.Socket? _socket;
   MediaStream? _localStream;
   MediaStreamTrack? _cameraTrack;
+  RTCRtpSender? _videoSender;
+  MediaStream? _screenStream;
+  MediaStreamTrack? _screenTrack;
   RTCPeerConnection? _publisher;
   Timer? _joinTimeout;
   Timer? _sfuRetryTimer;
@@ -73,6 +77,8 @@ class MeetingService extends ChangeNotifier {
   bool _inCall = false;
   bool _isMuted = false;
   bool _isVideoOff = false;
+  bool _isScreenSharing = false;
+  bool _screenShareBusy = false;
   bool _hasLocalVideo = false;
   bool _hasLocalAudio = false;
   bool _frontCamera = true;
@@ -88,6 +94,7 @@ class MeetingService extends ChangeNotifier {
   bool get isMuted => _isMuted;
   bool get isVideoOff => _isVideoOff;
   bool get hasLocalVideo => _hasLocalVideo;
+  bool get isScreenSharing => _isScreenSharing;
   bool get isFrontCamera => _frontCamera;
   bool get soundOn => _soundOn;
   int get unreadChat => _unreadChat;
@@ -193,8 +200,98 @@ class MeetingService extends ChangeNotifier {
     if (!_hasLocalVideo) return;
     _isVideoOff = !_isVideoOff;
     _cameraTrack?.enabled = !_isVideoOff;
-    if (_inCall) _emitCam(_isVideoOff);
+    if (_inCall && !_isScreenSharing) _emitCam(_isVideoOff);
     _notify();
+  }
+
+  Future<void> startScreenShare() async {
+    if (_isScreenSharing || _screenShareBusy || !_inCall || _tornDown) return;
+    final sender = _videoSender;
+    if (sender == null) {
+      _notice('Screen sharing needs your camera to be available');
+      return;
+    }
+    _screenShareBusy = true;
+    MediaStream? stream;
+    try {
+      if (!await ScreenShareForeground.start()) {
+        _notice('Screen sharing permission was denied');
+        return;
+      }
+      final iOS = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        'video': iOS ? {'deviceId': 'broadcast'} : true,
+        'audio': false,
+      });
+      final tracks = stream.getVideoTracks();
+      if (tracks.isEmpty || _tornDown || !_inCall || _videoSender == null) {
+        await _discardScreenStream(stream);
+        await ScreenShareForeground.stop();
+        return;
+      }
+      final track = tracks.first;
+      await sender.replaceTrack(track);
+      track.onEnded = () => unawaited(stopScreenShare());
+      _screenStream = stream;
+      _screenTrack = track;
+      _isScreenSharing = true;
+      if (_isVideoOff) _emitCam(false);
+      _emitScreenShare(true);
+      _notify();
+    } catch (_) {
+      if (stream != null) await _discardScreenStream(stream);
+      await ScreenShareForeground.stop();
+      _notice('Unable to start screen sharing');
+    } finally {
+      _screenShareBusy = false;
+    }
+  }
+
+  Future<void> stopScreenShare() async {
+    if (!_isScreenSharing) return;
+    _isScreenSharing = false;
+    final track = _screenTrack;
+    final stream = _screenStream;
+    _screenTrack = null;
+    _screenStream = null;
+    track?.onEnded = null;
+    final camera = _cameraTrack;
+    final sender = _videoSender;
+    if (camera != null && sender != null && !_tornDown) {
+      try {
+        await sender.replaceTrack(camera);
+      } catch (_) {}
+    }
+    if (stream != null) await _discardScreenStream(stream);
+    await ScreenShareForeground.stop();
+    if (_inCall) {
+      _emitScreenShare(false);
+      if (_isVideoOff) _emitCam(true);
+    }
+    _notify();
+  }
+
+  Future<void> _discardScreenStream(MediaStream stream) async {
+    for (final t in stream.getTracks()) {
+      try {
+        await t.stop();
+      } catch (_) {}
+    }
+    try {
+      await stream.dispose();
+    } catch (_) {}
+  }
+
+  Future<void> _disposeScreenShare() async {
+    final stream = _screenStream;
+    final wasSharing = _isScreenSharing;
+    _screenTrack?.onEnded = null;
+    _isScreenSharing = false;
+    _screenTrack = null;
+    _screenStream = null;
+    _videoSender = null;
+    if (stream != null) await _discardScreenStream(stream);
+    if (wasSharing) await ScreenShareForeground.stop();
   }
 
   Future<void> switchCamera() async {
@@ -356,6 +453,18 @@ class MeetingService extends ChangeNotifier {
       peer.isVideoOff = m['isVideoOff'] == true;
       _notify();
     });
+    s.on('meeting:participant-screen-share-status', (d) {
+      final m = asMap(d);
+      if (m == null) return;
+      final peer = _peers[(m['userId'] ?? '').toString()];
+      if (peer == null) return;
+      final sharing = m['isSharing'] == true;
+      if (peer.isScreenSharing != sharing) {
+        peer.isScreenSharing = sharing;
+        peer.fitContain = sharing;
+        _notify();
+      }
+    });
     s.on('meeting:muted-by-host', (d) {
       if (_hasLocalAudio && !_isMuted) {
         _isMuted = true;
@@ -421,8 +530,22 @@ class MeetingService extends ChangeNotifier {
     s.on('sfu:subscribed', (d) => _onSubscribed(asMap(d)));
     s.on('sfu:ice-candidate', (d) => _onRemoteCandidate(asMap(d)));
     s.on('sfu:subscribe-ice-candidate', (d) => _onSubscriberCandidate(asMap(d)));
+    s.on('meeting:error', (d) {
+      final text = asMap(d)?['message']?.toString() ?? 'Unable to join the meeting';
+      if (_phase == MeetingPhase.connecting || _phase == MeetingPhase.waitingRoom) {
+        _fail(text);
+        return;
+      }
+      _notice(text);
+    });
     s.on('sfu:error', (d) {
-      final text = asMap(d)?['message']?.toString() ?? 'Media server error';
+      final payload = asMap(d);
+      final text = payload?['message']?.toString() ?? 'Media server error';
+      final forbidden = payload?['code']?.toString() == 'FORBIDDEN' || payload?['statusCode'] == 403;
+      if (forbidden) {
+        _fail(text);
+        return;
+      }
       final lower = text.toLowerCase();
       final unauthorized = lower.contains('unauthor') || lower.contains('not authorized');
       if (unauthorized && !_sfuJoined && _inCall && _sfuAttempts < 5) {
@@ -520,6 +643,13 @@ class MeetingService extends ChangeNotifier {
       if (name.isNotEmpty) peer.name = name;
       if (item.containsKey('isMuted')) peer.isMuted = item['isMuted'] == true;
       if (item.containsKey('isVideoOff')) peer.isVideoOff = item['isVideoOff'] == true;
+      if (item.containsKey('isScreenSharing')) {
+        final sharing = item['isScreenSharing'] == true;
+        if (peer.isScreenSharing != sharing) {
+          peer.isScreenSharing = sharing;
+          peer.fitContain = sharing;
+        }
+      }
     }
     if (prune) {
       for (final id in _peers.keys.where((k) => !seen.contains(k)).toList()) {
@@ -564,8 +694,14 @@ class MeetingService extends ChangeNotifier {
         }
         _publisher = pc;
         pc.onIceCandidate = (c) => _emitCandidate(c);
+        _videoSender = null;
         for (final track in stream.getTracks()) {
-          await pc.addTrack(track, stream);
+          final sender = await pc.addTrack(track, stream);
+          if (track.kind == 'video') _videoSender = sender;
+        }
+        final screenTrack = _screenTrack;
+        if (_isScreenSharing && screenTrack != null && _videoSender != null) {
+          await _videoSender!.replaceTrack(screenTrack);
         }
       }
 
@@ -784,6 +920,12 @@ class MeetingService extends ChangeNotifier {
     }
   }
 
+  void _emitScreenShare(bool sharing) {
+    if (_connected) {
+      _socket!.emit('meeting:toggle-screen-share', {'meetingCode': meetingCode, 'isSharing': sharing});
+    }
+  }
+
   void _emitCam(bool off) {
     if (_connected) {
       _socket!.emit('meeting:toggle-cam', {'meetingCode': meetingCode, 'isVideoOff': off});
@@ -915,6 +1057,7 @@ class MeetingService extends ChangeNotifier {
   }
 
   Future<void> _releaseMedia({bool keepLocal = false}) async {
+    await _disposeScreenShare();
     for (final sub in _subs.values.toList()) {
       await _closePc(sub.pc);
     }
