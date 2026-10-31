@@ -21,8 +21,10 @@ class AuthService {
 
   ApiException _toApiException(DioException e) {
     final data = e.response?.data;
-    final message = (data is Map && data['message'] != null) ? data['message'].toString() : 'Cannot reach the server. Try again.';
-    return ApiException(message, statusCode: e.response?.statusCode);
+    final status = e.response?.statusCode;
+    final fallback = status == 429 ? 'Too many attempts. Please try again later.' : 'Cannot reach the server. Try again.';
+    final message = (data is Map && data['message'] != null) ? data['message'].toString() : fallback;
+    return ApiException(message, statusCode: status);
   }
 
   static Map<String, dynamic> userFrom(dynamic data) {
@@ -89,8 +91,8 @@ class AuthService {
   Future<void> sendVerificationOtp(String email) async {
     try {
       await apiClient.dio.post(
-        '/api/otp/send-verification',
-        data: {'email': email},
+        '/api/otp/send-otp',
+        data: {'email': email, 'type': 'verification'},
       );
     } on DioException catch (e) {
       throw _toApiException(e);

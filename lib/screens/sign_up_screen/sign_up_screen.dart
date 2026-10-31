@@ -49,6 +49,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
   }
 
   Future<void> _submitForm() async {
+    if (_isLoading) return;
     if (!(_formKey.currentState?.validate() ?? false) || !_isPasswordValid || !_passwordsMatch) {
       setState(() {
         _autoValidateMode = AutovalidateMode.onUserInteraction;
@@ -73,7 +74,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
       );
     } on ApiException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      final message = e.isRateLimited
+          ? 'Too many sign-up attempts. Please wait a few minutes and try again.'
+          : e.message;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

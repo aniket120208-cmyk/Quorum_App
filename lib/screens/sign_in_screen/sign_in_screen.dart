@@ -20,6 +20,8 @@ class _SignInScreenState extends State<SignInScreen> {
   AutovalidateMode _autoValidateMode = AutovalidateMode.disabled;
   bool _obscurePassword = true;
   bool _isFormFilled = false;
+  bool _isSendingCode = false;
+  String? _unverifiedEmail;
 
   final RegExp _emailRegex =  RegExp(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$");
 
@@ -33,9 +35,11 @@ class _SignInScreenState extends State<SignInScreen> {
   void _updateFormFilledState() {
     final isFilled = _emailController.text.trim().isNotEmpty &&
         _passwordController.text.isNotEmpty;
-    if (_isFormFilled != isFilled) {
+    final stale = _unverifiedEmail != null && _unverifiedEmail != _emailController.text.trim();
+    if (stale || _isFormFilled != isFilled) {
       setState(() {
         _isFormFilled = isFilled;
+        if (stale) _unverifiedEmail = null;
       });
     }
   }
@@ -71,14 +75,8 @@ class _SignInScreenState extends State<SignInScreen> {
     );
   } on ApiException catch (e) {
     if (!mounted) return;
-    if (e.statusCode == 403 && e.message.toLowerCase().contains('verif')) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => VerifyEmailScreen(email: email, password: password),
-        ),
-      );
+    if (e.isEmailNotVerified) {
+      setState(() => _unverifiedEmail = email);
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -86,6 +84,74 @@ class _SignInScreenState extends State<SignInScreen> {
     if (mounted) setState(() => _isLoading = false);
   }
 }
+
+  Future<void> _sendVerificationCode() async {
+    if (_isSendingCode) return;
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    setState(() => _isSendingCode = true);
+    try {
+      await AuthService.instance.sendVerificationOtp(email);
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => VerifyEmailScreen(email: email, password: password),
+        ),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _isSendingCode = false);
+    }
+  }
+
+  Widget _buildVerifyBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E212A),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.6)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Your email is not verified yet',
+            style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Verify your email to sign in. We will send a code to your inbox when you tap the button below.',
+            style: TextStyle(color: Color(0xFF8E95A9), fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: OutlinedButton(
+              onPressed: _isSendingCode ? null : _sendVerificationCode,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Color(0xFF4C4FE8)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: _isSendingCode
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text('Verify Email', style: TextStyle(fontWeight: FontWeight.w600)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -236,6 +302,10 @@ class _SignInScreenState extends State<SignInScreen> {
                                       : const Text('Sign In', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                                     ),
                                   ),
+                                  if (_unverifiedEmail != null) ...[
+                                    const SizedBox(height: 16),
+                                    _buildVerifyBanner(),
+                                  ],
                                 ],
                               ),
                             ),
