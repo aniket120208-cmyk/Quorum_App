@@ -518,34 +518,38 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
 
   Widget _teamsTab() {
     final canManage = orgCanInvite(_org.role);
-    return RefreshIndicator(
-      color: orgTeal,
-      backgroundColor: orgCard,
-      onRefresh: _load,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
-        children: [
-          if (canManage)
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: _createTeam,
-                icon: const Icon(Icons.add_rounded, color: orgTeal, size: 18),
-                label: const Text('New team', style: TextStyle(color: orgTeal, fontWeight: FontWeight.w700)),
-              ),
-            ),
-          if (_teams.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 48),
-              child: Center(child: Text('No teams yet', style: TextStyle(color: orgMuted))),
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      floatingActionButton: canManage
+          ? FloatingActionButton.extended(
+              onPressed: _createTeam,
+              backgroundColor: orgAccent,
+              foregroundColor: Colors.white,
+              elevation: 2,
+              icon: const Icon(Icons.add_rounded, size: 20),
+              label: const Text('New team', style: TextStyle(fontWeight: FontWeight.w700)),
             )
-          else
-            for (final team in _teams) ...[
-              _teamTile(team, canManage),
-              const SizedBox(height: 10),
-            ],
-        ],
+          : null,
+      body: RefreshIndicator(
+        color: orgTeal,
+        backgroundColor: orgCard,
+        onRefresh: _load,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.fromLTRB(20, 14, 20, canManage ? 96 : 24),
+          children: [
+            if (_teams.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 48),
+                child: Center(child: Text('No teams yet', style: TextStyle(color: orgMuted))),
+              )
+            else
+              for (final team in _teams) ...[
+                _teamTile(team, canManage),
+                const SizedBox(height: 10),
+              ],
+          ],
+        ),
       ),
     );
   }

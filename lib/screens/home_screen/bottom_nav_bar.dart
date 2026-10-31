@@ -19,11 +19,11 @@ class CustomBottomNavBar extends StatelessWidget {
   static const double buttonSize = 56;
   static const Duration duration = Duration(milliseconds: 280);
   static const List<_Item> _items = [
-    _Item(Icons.home_outlined, 'Home'),
-    _Item(Icons.chat_bubble_outline_rounded, 'Chat'),
-    _Item(Icons.videocam_outlined, 'Video Call'),
-    _Item(Icons.groups_2_outlined, 'Community'),
-    _Item(Icons.auto_awesome_outlined, 'AI Assistant'),
+    _Item(Icons.home, 'Home'),
+    _Item(Icons.chat_bubble, 'Chat'),
+    _Item(Icons.videocam, 'Video Call'),
+    _Item(Icons.groups, 'Community'),
+    _Item(Icons.person_add, 'AI Assistant'),
   ];
 
   @override
@@ -148,18 +148,46 @@ class _NavItem extends StatelessWidget {
         label: item.label,
         button: true,
         selected: isSelected,
+        excludeSemantics: true,
         child: InkWell(
           onTap: onTap,
           splashColor: Colors.transparent,
           highlightColor: Colors.transparent,
           child: Center(
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 150),
-              opacity: isSelected ? 0 : 1,
-              child: Icon(
-                item.icon,
-                size: 25,
-                color: CustomBottomNavBar.inactiveColor,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AnimatedOpacity(
+                    duration: const Duration(milliseconds: 150),
+                    opacity: isSelected ? 0 : 1,
+                    child: Icon(
+                      item.icon,
+                      size: 24,
+                      color: CustomBottomNavBar.inactiveColor,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 200),
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      height: 1.1,
+                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                      color: isSelected
+                          ? CustomBottomNavBar.activeColor
+                          : CustomBottomNavBar.inactiveColor.withOpacity(0.85),
+                    ),
+                    child: Text(
+                      item.label,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -173,7 +201,7 @@ class _NotchedBarPainter extends CustomPainter {
   final Color color;
   final Color edgeColor;
   final double centerX;
-  
+
   _NotchedBarPainter({
     required this.color,
     required this.edgeColor,
