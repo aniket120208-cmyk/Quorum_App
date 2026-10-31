@@ -99,6 +99,17 @@ class JiraRepository {
         return _tickets(_data(r));
       });
 
+  Future<List<JiraAssignee>> assignees(String orgId, String teamId) => _guard(() async {
+        final r = await _dio.get('/api/organizations/$orgId/teams/$teamId/jira/assignees');
+        var d = _data(r);
+        if (d is Map) d = d['assignees'] ?? d['members'] ?? d['users'];
+        if (d is! List) return const <JiraAssignee>[];
+        return d
+            .map((e) => JiraAssignee.fromJson(_map(e)))
+            .where((a) => a.accountId.isNotEmpty)
+            .toList();
+      });
+
   Future<JiraTicket> createTicket(
     String orgId,
     String teamId, {

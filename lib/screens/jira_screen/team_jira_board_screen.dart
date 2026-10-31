@@ -302,57 +302,58 @@ class CreateJiraTicketSheet extends StatefulWidget {
 class _CreateJiraTicketSheetState extends State<CreateJiraTicketSheet> {
   final _summaryCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
-  final _assigneeCtrl = TextEditingController();
   String _issueType = 'Task';
   String _priority = 'Medium';
-  String _assignee = 'Unassigned';
+  String? _assigneeId;
+  List<JiraAssignee> _assignees = const [];
+  bool _loadingAssignees = true;
+  String? _assigneesError;
   String? _summaryError;
-  String? _assigneeError;
   bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAssignees();
+  }
+
+  Future<void> _loadAssignees() async {
+    setState(() {
+      _loadingAssignees = true;
+      _assigneesError = null;
+    });
+    try {
+      final list = await JiraRepository.instance.assignees(widget.organization.id, widget.team.id);
+      if (!mounted) return;
+      setState(() {
+        _assignees = list;
+        _loadingAssignees = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _assigneesError = errorText(e);
+        _loadingAssignees = false;
+      });
+    }
+  }
 
   @override
   void dispose() {
     _summaryCtrl.dispose();
     _descCtrl.dispose();
-    _assigneeCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     if (_saving) return;
     final summary = _summaryCtrl.text.trim();
-    final customAssignee = _assigneeCtrl.text.trim();
-    String? summaryError;
-    String? assigneeError;
     if (summary.isEmpty) {
-      summaryError = 'Ticket summary is required';
-    }
-    if (_assignee == 'Other') {
-      if (customAssignee.isEmpty) {
-        assigneeError = 'Enter an Atlassian account ID';
-      } else if (RegExp(r'\s').hasMatch(customAssignee)) {
-        assigneeError = 'Account ID cannot contain spaces';
-      }
-    }
-    if (summaryError != null || assigneeError != null) {
-      setState(() {
-        _summaryError = summaryError;
-        _assigneeError = assigneeError;
-      });
+      setState(() => _summaryError = 'Ticket summary is required');
       return;
-    }
-    final String? assigneeAccountId;
-    switch (_assignee) {
-      case 'Me':
-        assigneeAccountId = widget.myAccountId;
-      case 'Other':
-        assigneeAccountId = customAssignee;
-      default:
-        assigneeAccountId = null;
     }
     setState(() {
       _summaryError = null;
-      _assigneeError = null;
       _saving = true;
     });
     try {
@@ -363,7 +364,7 @@ class _CreateJiraTicketSheetState extends State<CreateJiraTicketSheet> {
         description: _descCtrl.text.trim(),
         issueType: _issueType,
         priority: _priority,
-        assigneeAccountId: assigneeAccountId,
+        assigneeAccountId: _assigneeId,
       );
       if (!mounted) return;
       Navigator.pop(context, true);
@@ -397,6 +398,102 @@ class _CreateJiraTicketSheetState extends State<CreateJiraTicketSheet> {
               ),
           ],
         ),
+      ],
+    );
+  }
+
+  Widget _assigneeTile({
+    required String label,
+    required bool selected,
+    required VoidCallback? onTap,
+    String? subtitle,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? orgAccent.withValues(alpha: 0.18) : orgField,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: selected ? orgAccent : orgBorder),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              selected ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
+              size: 20,
+              color: selected ? orgAccent : orgMuted,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                  if (subtitle != null)
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: orgMuted, fontSize: 11.5),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _assigneePicker() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Assignee', style: TextStyle(color: orgMuted, fontSize: 12)),
+        const SizedBox(height: 8),
+        _assigneeTile(
+          label: 'Unassigned',
+          selected: _assigneeId == null,
+          onTap: _saving ? null : () => setState(() => _assigneeId = null),
+        ),
+        if (_loadingAssignees)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 14),
+            child: Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, color: orgAccent),
+              ),
+            ),
+          )
+        else if (_assigneesError != null) ...[
+          const SizedBox(height: 8),
+          Text(_assigneesError!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+          TextButton(onPressed: _loadAssignees, child: const Text('Retry')),
+        ] else if (_assignees.isEmpty) ...[
+          const SizedBox(height: 8),
+          const Text(
+            'No team members with a connected Jira account yet.',
+            style: TextStyle(color: orgMuted, fontSize: 11.5),
+          ),
+        ] else
+          for (final person in _assignees) ...[
+            const SizedBox(height: 8),
+            _assigneeTile(
+              label: person.accountId == widget.myAccountId ? '${person.name} (Me)' : person.name,
+              subtitle: person.email,
+              selected: _assigneeId == person.accountId,
+              onTap: _saving ? null : () => setState(() => _assigneeId = person.accountId),
+            ),
+          ],
       ],
     );
   }
@@ -436,35 +533,7 @@ class _CreateJiraTicketSheetState extends State<CreateJiraTicketSheet> {
           const SizedBox(height: 16),
           _choiceRow('Priority', const ['High', 'Medium', 'Low'], _priority, (v) => setState(() => _priority = v)),
           const SizedBox(height: 16),
-          _choiceRow(
-            'Assignee',
-            [
-              'Unassigned',
-              if (widget.myAccountId != null) 'Me',
-              'Other',
-            ],
-            _assignee,
-            (v) => setState(() {
-              _assignee = v;
-              _assigneeError = null;
-            }),
-          ),
-          if (widget.myAccountId == null) ...[
-            const SizedBox(height: 6),
-            const Text(
-              'Assign to me appears once a Jira ticket has been assigned to you.',
-              style: TextStyle(color: orgMuted, fontSize: 11.5),
-            ),
-          ],
-          if (_assignee == 'Other') ...[
-            const SizedBox(height: 12),
-            TextField(
-              controller: _assigneeCtrl,
-              style: const TextStyle(color: Colors.white),
-              enabled: !_saving,
-              decoration: orgInputDecoration('Atlassian account ID', hint: 'e.g. 712020:...').copyWith(errorText: _assigneeError),
-            ),
-          ],
+          _assigneePicker(),
           const SizedBox(height: 22),
           OrgPrimaryButton(label: 'Create ticket', loading: _saving, onPressed: _save),
         ],
