@@ -51,9 +51,9 @@ class _OrganizationSettingsScreenState extends State<OrganizationSettingsScreen>
     if (confirmed != true || !mounted) return;
     setState(() => _busy = true);
     try {
-      await _repo.delete(_org.id);
+      final message = await _repo.delete(_org.id, name: _org.name);
       if (!mounted) return;
-      orgToast(context, '${_org.name} was deleted');
+      orgToast(context, message);
       Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {

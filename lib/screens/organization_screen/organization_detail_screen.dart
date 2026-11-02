@@ -90,8 +90,11 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
     } catch (e) {
       if (!mounted) return;
       if (e is ApiException && e.statusCode == 404) {
-        orgToast(context, e.message, error: true);
-        Navigator.pop(context);
+        _poller?.cancel();
+        if (ModalRoute.of(context)?.isCurrent ?? false) {
+          orgToast(context, e.message, error: true);
+          Navigator.pop(context, true);
+        }
         return;
       }
       setState(() {
@@ -169,13 +172,22 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
   }
 
   Future<void> _openSettings() async {
+    _poller?.cancel();
     final exited = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (_) => OrganizationSettingsScreen(organization: _org),
       ),
     );
-    if (exited == true && mounted) Navigator.pop(context);
+    if (!mounted) return;
+    if (exited == true) {
+      Navigator.pop(context, true);
+      return;
+    }
+    _poller = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!_loading) _load();
+    });
+    _load();
   }
 
   Future<void> _openMeetings() async {

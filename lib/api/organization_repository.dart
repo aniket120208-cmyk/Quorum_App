@@ -90,8 +90,16 @@ class OrganizationRepository {
         await _dio.post('/api/organizations/$id/leave', data: <String, dynamic>{});
       });
 
-  Future<void> delete(String id) => _guard(() async {
-        await _dio.delete('/api/organizations/$id');
+  Future<String> delete(String id, {String? name}) => _guard(() async {
+        final r = await _dio.delete(
+          '/api/organizations/$id',
+          data: <String, dynamic>{},
+          options: Options(contentType: Headers.jsonContentType),
+        );
+        final body = r.data;
+        final message = body is Map ? body['message']?.toString() : null;
+        if (message != null && message.isNotEmpty) return message;
+        return name != null && name.isNotEmpty ? "Organization '$name' deleted successfully" : 'Organization deleted successfully';
       });
 
   Future<List<OrgMember>> members(String id) => _guard(() async {
