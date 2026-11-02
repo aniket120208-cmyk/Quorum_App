@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/auth_service.dart';
 import 'package:quorum_app/api/calendar_repository.dart';
@@ -8,6 +9,7 @@ import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/meeting_history_store.dart';
 import 'package:quorum_app/api/notification_service.dart';
 import 'package:quorum_app/api/organization_repository.dart';
+import 'package:quorum_app/api/user_service.dart';
 import 'package:quorum_app/models/calendar_models.dart';
 import 'package:quorum_app/models/organization_models.dart';
 import 'package:quorum_app/screens/home_screen/calendar_helpers.dart';
@@ -40,6 +42,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _upcomingLoading = true;
   String? _profileError;
   bool _loggingOut = false;
+  bool _uploadingAvatar = false;
+  double _avatarProgress = 0;
+  String? _localAvatarPath;
 
   @override
   void initState() {
@@ -190,6 +195,115 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Future<ImageSource?> _chooseAvatarSource() {
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: orgCard,
+      shape: orgSheetShape,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: orgTeal),
+              title: const Text('Choose from gallery', style: TextStyle(color: Colors.white)),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined, color: orgTeal),
+              title: const Text('Take a photo', style: TextStyle(color: Colors.white)),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _changeAvatar() async {
+    if (_uploadingAvatar) return;
+    final source = await _chooseAvatarSource();
+    if (source == null || !mounted) return;
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+      if (picked == null || !mounted) return;
+      setState(() {
+        _uploadingAvatar = true;
+        _avatarProgress = 0;
+        _localAvatarPath = picked.path;
+      });
+      final user = await UserService.instance.uploadAvatar(
+        path: picked.path,
+        fileName: picked.name,
+        onProgress: (p) {
+          if (mounted) setState(() => _avatarProgress = p);
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _profile = {..._profile, ...user};
+        _uploadingAvatar = false;
+        _localAvatarPath = null;
+      });
+      orgToast(context, 'Profile photo updated');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _uploadingAvatar = false;
+        _localAvatarPath = null;
+      });
+      orgToast(context, errorText(e), error: true);
+    }
+  }
+
+  Widget _avatarPicker() {
+    return GestureDetector(
+      onTap: _changeAvatar,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          OrgAvatar(name: _name, logo: _avatar, localPath: _localAvatarPath, size: 84, circular: true),
+          if (_uploadingAvatar)
+            Container(
+              width: 84,
+              height: 84,
+              decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+              alignment: Alignment.center,
+              child: SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: orgTeal,
+                  value: _avatarProgress > 0 && _avatarProgress < 1 ? _avatarProgress : null,
+                ),
+              ),
+            ),
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: orgAccent,
+                shape: BoxShape.circle,
+                border: Border.all(color: orgBg, width: 2),
+              ),
+              child: const Icon(Icons.photo_camera_rounded, color: Colors.white, size: 14),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _copyEmail() async {
     final email = _email;
     if (email == null) return;
@@ -292,7 +406,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       child: Column(
         children: [
-          OrgAvatar(name: _name, logo: _avatar, size: 84, circular: true),
+          _avatarPicker(),
           const SizedBox(height: 14),
           if (_profileLoading && _profile.isEmpty)
             const SizedBox(
