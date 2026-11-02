@@ -28,13 +28,24 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
     ],
   };
 
-  final _inputCtrl = TextEditingController();
   final _contextCtrl = TextEditingController();
   final _scopeIdCtrl = TextEditingController();
-  final _scrollCtrl = ScrollController();
-  final List<AiTurn> _turns = [];
+  final Map<AiMode, List<AiTurn>> _turnsByMode = {
+    for (final m in AiMode.values) m: <AiTurn>[],
+  };
+  final Map<AiMode, TextEditingController> _inputs = {
+    for (final m in AiMode.values) m: TextEditingController(),
+  };
+  final Map<AiMode, ScrollController> _scrolls = {
+    for (final m in AiMode.values) m: ScrollController(),
+  };
+  final Set<AiMode> _pendingModes = {};
   int _nextId = 0;
-  bool _pending = false;
+
+  List<AiTurn> get _turns => _turnsByMode[_mode]!;
+  TextEditingController get _inputCtrl => _inputs[_mode]!;
+  ScrollController get _scrollCtrl => _scrolls[_mode]!;
+  bool get _pending => _pendingModes.contains(_mode);
 
   AiMode _mode = AiMode.chat;
   AiScope _scope = AiScope.organization;
@@ -47,10 +58,14 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
 
   @override
   void dispose() {
-    _inputCtrl.dispose();
+    for (final c in _inputs.values) {
+      c.dispose();
+    }
+    for (final c in _scrolls.values) {
+      c.dispose();
+    }
     _contextCtrl.dispose();
     _scopeIdCtrl.dispose();
-    _scrollCtrl.dispose();
     super.dispose();
   }
 
@@ -132,41 +147,45 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
       caption: caption,
       run: run,
     );
-    setState(() => _turns.add(turn));
-    _inputCtrl.clear();
+    setState(() => _turnsByMode[mode]!.add(turn));
+    _inputs[mode]!.clear();
     _scrollToEnd();
     _execute(turn);
   }
 
-  void _setTurn(int id, AiTurn Function(AiTurn t) change) {
+  void _setTurn(AiMode mode, int id, AiTurn Function(AiTurn t) change) {
     if (!mounted) return;
-    final i = _turns.indexWhere((t) => t.id == id);
+    final list = _turnsByMode[mode]!;
+    final i = list.indexWhere((t) => t.id == id);
     if (i == -1) return;
-    setState(() => _turns[i] = change(_turns[i]));
+    setState(() => list[i] = change(list[i]));
   }
 
   Future<void> _execute(AiTurn turn) async {
     if (!mounted) return;
-    setState(() => _pending = true);
-    _setTurn(turn.id, (t) => t.copyWith(state: TurnState.loading));
+    final mode = turn.mode;
+    setState(() => _pendingModes.add(mode));
+    _setTurn(mode, turn.id, (t) => t.copyWith(state: TurnState.loading));
     try {
       final result = await turn.run();
-      _setTurn(turn.id, (t) => t.copyWith(state: TurnState.done, result: result));
+      _setTurn(mode, turn.id, (t) => t.copyWith(state: TurnState.done, result: result));
     } catch (e) {
       _setTurn(
+        mode,
         turn.id,
         (t) => t.copyWith(state: TurnState.error, error: errorText(e)),
       );
     } finally {
-      if (mounted) setState(() => _pending = false);
+      if (mounted) setState(() => _pendingModes.remove(mode));
     }
   }
 
   void _scrollToEnd() {
+    final ctrl = _scrollCtrl;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollCtrl.hasClients) return;
-      _scrollCtrl.animateTo(
-        _scrollCtrl.position.maxScrollExtent,
+      if (!ctrl.hasClients) return;
+      ctrl.animateTo(
+        ctrl.position.maxScrollExtent,
         duration: const Duration(milliseconds: 250),
         curve: Curves.easeOut,
       );
@@ -618,7 +637,7 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
             icon: const Icon(Icons.delete_sweep_outlined, color: AppColors.textPrimary),
             onPressed: (_turns.isEmpty || _pending)
                 ? null
-                : () => setState(_turns.clear),
+                : () => setState(() => _turnsByMode[_mode]!.clear()),
           ),
           IconButton(
             tooltip: 'History',
@@ -634,6 +653,7 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
             child: _turns.isEmpty
                 ? _emptyState()
                 : ListView.builder(
+                    key: ValueKey(_mode),
                     controller: _scrollCtrl,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                     itemCount: _turns.length,
