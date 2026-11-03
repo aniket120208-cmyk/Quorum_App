@@ -26,6 +26,8 @@ class CommunityRepository {
             msg = 'You do not have permission to do that.';
           case 404:
             msg = 'That item was not found.';
+          case 409:
+            msg = 'This request was already handled.';
           case 410:
             msg = 'This invitation link has expired.';
           default:
@@ -251,5 +253,51 @@ class CommunityRepository {
 
   Future<void> deleteComment(String commentId) => _guard(() async {
         await _dio.delete('/api/community-comments/$commentId');
+      });
+
+  Future<PageResult<DiscoveredCommunity>> discover(String query, {String? cursor, int limit = 20}) =>
+      _guard(() async {
+        final r = await _dio.get('/api/communities/search', queryParameters: {
+          if (query.trim().isNotEmpty) 'q': query.trim(),
+          ..._paging(cursor, limit),
+        });
+        final d = _data(r);
+        final items = _list(d, 'communities').map((e) => DiscoveredCommunity.fromJson(_map(e))).toList();
+        final next = d is Map ? d['nextCursor']?.toString() : null;
+        final more = d is Map && d['hasMore'] == true && next != null && next.isNotEmpty;
+        return PageResult<DiscoveredCommunity>(items, more ? next : null, more);
+      });
+
+  Future<CommunityJoinRequest> sendJoinRequest(String id, {String message = ''}) => _guard(() async {
+        final r = await _dio.post('/api/communities/$id/join-requests', data: {
+          if (message.isNotEmpty) 'message': message,
+        });
+        return CommunityJoinRequest.fromJson(_map(_data(r)));
+      });
+
+  Future<List<CommunityJoinRequest>> myJoinRequests() => _guard(() async {
+        final r = await _dio.get('/api/communities/join-requests/my');
+        return _list(_data(r), 'requests').map((e) => CommunityJoinRequest.fromJson(_map(e))).toList();
+      });
+
+  Future<void> cancelJoinRequest(String id) => _guard(() async {
+        await _dio.delete('/api/communities/$id/join-requests');
+      });
+
+  Future<List<CommunityJoinRequest>> joinRequests(String id,
+          {JoinRequestStatus status = JoinRequestStatus.pending}) =>
+      _guard(() async {
+        final r = await _dio.get('/api/communities/$id/join-requests', queryParameters: {'status': status.value});
+        return _list(_data(r), 'requests').map((e) => CommunityJoinRequest.fromJson(_map(e))).toList();
+      });
+
+  Future<void> acceptJoinRequest(String id, String requestId) => _guard(() async {
+        await _dio.post('/api/communities/$id/join-requests/$requestId/accept');
+      });
+
+  Future<void> rejectJoinRequest(String id, String requestId, {String reason = ''}) => _guard(() async {
+        await _dio.post('/api/communities/$id/join-requests/$requestId/reject', data: {
+          if (reason.isNotEmpty) 'reason': reason,
+        });
       });
 }
