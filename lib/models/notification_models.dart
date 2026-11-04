@@ -3,6 +3,9 @@ enum NotificationType {
   teamInvite('TEAM_INVITE', 'Team invites'),
   communityInvite('COMMUNITY_INVITE', 'Community invites'),
   communityPostComment('COMMUNITY_POST_COMMENT', 'Community comments'),
+  communityJoinRequest('COMMUNITY_JOIN_REQUEST', 'Community join requests'),
+  communityJoinAccepted('COMMUNITY_JOIN_ACCEPTED', 'Community join accepted'),
+  communityJoinRejected('COMMUNITY_JOIN_REJECTED', 'Community join declined'),
   meetingStarted('MEETING_STARTED', 'Meeting started'),
   directMessage('DIRECT_MESSAGE', 'Direct messages'),
   eventReminder('EVENT_REMINDER', 'Calendar reminders'),
@@ -11,6 +14,15 @@ enum NotificationType {
   const NotificationType(this.value, this.label);
   final String value;
   final String label;
+
+  static const List<NotificationType> _outcomes = [
+    communityJoinRequest,
+    communityJoinAccepted,
+    communityJoinRejected,
+  ];
+
+  static List<NotificationType> get configurable =>
+      values.where((t) => !_outcomes.contains(t)).toList();
 
   static NotificationType from(String? raw) {
     for (final t in NotificationType.values) {

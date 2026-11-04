@@ -49,6 +49,12 @@ IconData notificationIcon(NotificationType t) {
       return Icons.groups_2_rounded;
     case NotificationType.communityPostComment:
       return Icons.chat_bubble_rounded;
+    case NotificationType.communityJoinRequest:
+      return Icons.how_to_reg_rounded;
+    case NotificationType.communityJoinAccepted:
+      return Icons.check_circle_rounded;
+    case NotificationType.communityJoinRejected:
+      return Icons.cancel_rounded;
     case NotificationType.meetingStarted:
       return Icons.videocam_rounded;
     case NotificationType.directMessage:

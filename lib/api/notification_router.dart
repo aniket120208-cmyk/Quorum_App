@@ -7,6 +7,7 @@ import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/app_navigator.dart';
 import 'package:quorum_app/models/notification_models.dart';
 import 'package:quorum_app/screens/chat_screen/chat_room_screen.dart';
+import 'package:quorum_app/screens/community_screen/community_join_requests_screen.dart';
 import 'package:quorum_app/screens/community_screen/communtiy_details_screen.dart';
 import 'package:quorum_app/screens/community_screen/post_comments_screen.dart';
 import 'package:quorum_app/screens/organization_screen/join_organization_screen.dart';
@@ -47,6 +48,18 @@ class NotificationRouter {
           nav.push(MaterialPageRoute(builder: (_) => OrganizationDetailScreen(organization: org)));
         case NotificationType.communityPostComment:
           await _openCommunity(nav, s('communityId'), postId: s('postId'));
+        case NotificationType.communityJoinRequest:
+          await _openJoinRequests(nav, s('communityId'), s('communityName'));
+        case NotificationType.communityJoinAccepted:
+          await _openCommunity(nav, s('communityId'));
+        case NotificationType.communityJoinRejected:
+          final reason = s('reason');
+          final name = s('communityName');
+          _snack(
+            reason.isNotEmpty
+                ? 'Your join request was declined: $reason'
+                : 'Your request to join ${name.isEmpty ? 'the community' : name} was declined.',
+          );
         case NotificationType.communityInvite:
           if (s('inviteId').isNotEmpty) {
             await _respondToInvite(nav, s('inviteId'), s('communityId'), s('communityName'));
@@ -114,6 +127,17 @@ class NotificationRouter {
         ),
       ));
     }
+  }
+
+  static Future<void> _openJoinRequests(NavigatorState nav, String communityId, String communityName) async {
+    if (communityId.isEmpty) return;
+    var name = communityName;
+    if (name.isEmpty) {
+      name = (await CommunityRepository.instance.detail(communityId)).name;
+    }
+    nav.push(MaterialPageRoute(
+      builder: (_) => CommunityJoinRequestsScreen(communityId: communityId, communityName: name),
+    ));
   }
 
   static Future<void> _respondToInvite(

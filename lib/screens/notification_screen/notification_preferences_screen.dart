@@ -39,8 +39,8 @@ class _NotificationPreferencesScreenState extends State<NotificationPreferencesS
       setState(() {
         _prefs
           ..clear()
-          ..addEntries(NotificationType.values.map((t) => MapEntry(t, NotificationPreference(type: t))))
-          ..addEntries(list.map((p) => MapEntry(p.type, p)));
+          ..addEntries(NotificationType.configurable.map((t) => MapEntry(t, NotificationPreference(type: t))))
+          ..addEntries(list.where((p) => NotificationType.configurable.contains(p.type)).map((p) => MapEntry(p.type, p)));
         _loading = false;
       });
     } catch (e) {
@@ -96,7 +96,7 @@ class _NotificationPreferencesScreenState extends State<NotificationPreferencesS
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
       children: [
-        for (final t in NotificationType.values) ...[
+        for (final t in NotificationType.configurable) ...[
           _group(_prefs[t]!),
           const SizedBox(height: 10),
         ],
