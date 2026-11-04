@@ -330,3 +330,199 @@ class InvitePreview {
     );
   }
 }
+
+enum MembershipStatus {
+  owner,
+  admin,
+  member,
+  pendingRequest,
+  notMember;
+
+  static MembershipStatus from(String? raw) {
+    switch ((raw ?? '').toUpperCase()) {
+      case 'OWNER':
+        return MembershipStatus.owner;
+      case 'ADMIN':
+        return MembershipStatus.admin;
+      case 'MEMBER':
+        return MembershipStatus.member;
+      case 'PENDING_REQUEST':
+        return MembershipStatus.pendingRequest;
+      default:
+        return MembershipStatus.notMember;
+    }
+  }
+
+  bool get isJoined =>
+      this == MembershipStatus.owner || this == MembershipStatus.admin || this == MembershipStatus.member;
+
+  String get role {
+    switch (this) {
+      case MembershipStatus.owner:
+        return 'OWNER';
+      case MembershipStatus.admin:
+        return 'ADMIN';
+      default:
+        return 'MEMBER';
+    }
+  }
+}
+
+class DiscoveredCommunity {
+  final String id;
+  final String name;
+  final String? description;
+  final String? icon;
+  final DateTime? createdAt;
+  final int memberCount;
+  final int channelCount;
+  final MembershipStatus status;
+  final String? pendingRequestId;
+
+  const DiscoveredCommunity({
+    required this.id,
+    required this.name,
+    this.description,
+    this.icon,
+    this.createdAt,
+    required this.memberCount,
+    required this.channelCount,
+    required this.status,
+    this.pendingRequestId,
+  });
+
+  DiscoveredCommunity copyWith({MembershipStatus? status, String? pendingRequestId, bool clearPending = false}) =>
+      DiscoveredCommunity(
+        id: id,
+        name: name,
+        description: description,
+        icon: icon,
+        createdAt: createdAt,
+        memberCount: memberCount,
+        channelCount: channelCount,
+        status: status ?? this.status,
+        pendingRequestId: clearPending ? null : (pendingRequestId ?? this.pendingRequestId),
+      );
+
+  factory DiscoveredCommunity.fromJson(Map<String, dynamic> j) {
+    final rawIcon = j['icon']?.toString();
+    final rawPending = j['pendingRequestId']?.toString();
+    return DiscoveredCommunity(
+      id: j['id'].toString(),
+      name: (j['name'] ?? '').toString(),
+      description: j['description']?.toString(),
+      icon: (rawIcon == null || rawIcon.isEmpty) ? null : rawIcon,
+      createdAt: _date(j['createdAt']),
+      memberCount: _int(j['memberCount']),
+      channelCount: _int(j['channelCount']),
+      status: MembershipStatus.from(j['membershipStatus']?.toString()),
+      pendingRequestId: (rawPending == null || rawPending.isEmpty) ? null : rawPending,
+    );
+  }
+}
+
+enum JoinRequestStatus {
+  pending,
+  accepted,
+  rejected,
+  cancelled;
+
+  static JoinRequestStatus from(String? raw) {
+    switch ((raw ?? '').toUpperCase()) {
+      case 'ACCEPTED':
+        return JoinRequestStatus.accepted;
+      case 'REJECTED':
+        return JoinRequestStatus.rejected;
+      case 'CANCELLED':
+        return JoinRequestStatus.cancelled;
+      default:
+        return JoinRequestStatus.pending;
+    }
+  }
+
+  String get value => name.toUpperCase();
+}
+
+class JoinRequestApplicant {
+  final String id;
+  final String name;
+  final String email;
+  final String? avatar;
+
+  const JoinRequestApplicant({
+    required this.id,
+    required this.name,
+    required this.email,
+    this.avatar,
+  });
+
+  factory JoinRequestApplicant.fromJson(Map<String, dynamic> j) {
+    final rawAvatar = j['avatar']?.toString();
+    return JoinRequestApplicant(
+      id: (j['id'] ?? '').toString(),
+      name: (j['name'] ?? '').toString(),
+      email: (j['email'] ?? '').toString(),
+      avatar: (rawAvatar == null || rawAvatar.isEmpty) ? null : rawAvatar,
+    );
+  }
+}
+
+class JoinRequestCommunity {
+  final String id;
+  final String name;
+  final String? description;
+  final String? icon;
+
+  const JoinRequestCommunity({
+    required this.id,
+    required this.name,
+    this.description,
+    this.icon,
+  });
+
+  factory JoinRequestCommunity.fromJson(Map<String, dynamic> j) {
+    final rawIcon = j['icon']?.toString();
+    return JoinRequestCommunity(
+      id: (j['id'] ?? '').toString(),
+      name: (j['name'] ?? '').toString(),
+      description: j['description']?.toString(),
+      icon: (rawIcon == null || rawIcon.isEmpty) ? null : rawIcon,
+    );
+  }
+}
+
+class CommunityJoinRequest {
+  final String id;
+  final String communityId;
+  final String userId;
+  final JoinRequestStatus status;
+  final String? message;
+  final DateTime? createdAt;
+  final JoinRequestApplicant? user;
+  final JoinRequestCommunity? community;
+
+  const CommunityJoinRequest({
+    required this.id,
+    required this.communityId,
+    required this.userId,
+    required this.status,
+    this.message,
+    this.createdAt,
+    this.user,
+    this.community,
+  });
+
+  factory CommunityJoinRequest.fromJson(Map<String, dynamic> j) {
+    final rawMessage = j['message']?.toString();
+    return CommunityJoinRequest(
+      id: j['id'].toString(),
+      communityId: (j['communityId'] ?? '').toString(),
+      userId: (j['userId'] ?? '').toString(),
+      status: JoinRequestStatus.from(j['status']?.toString()),
+      message: (rawMessage == null || rawMessage.trim().isEmpty) ? null : rawMessage.trim(),
+      createdAt: _date(j['createdAt']),
+      user: j['user'] is Map ? JoinRequestApplicant.fromJson(Map<String, dynamic>.from(j['user'])) : null,
+      community: j['community'] is Map ? JoinRequestCommunity.fromJson(Map<String, dynamic>.from(j['community'])) : null,
+    );
+  }
+}
