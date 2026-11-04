@@ -151,6 +151,7 @@ class TextPromptDialog extends StatefulWidget {
     this.hint,
     this.initial = '',
     this.maxLines = 1,
+    this.maxLength,
   });
 
   final String title;
@@ -158,6 +159,7 @@ class TextPromptDialog extends StatefulWidget {
   final String? hint;
   final String initial;
   final int maxLines;
+  final int? maxLength;
 
   @override
   State<TextPromptDialog> createState() => _TextPromptDialogState();
@@ -182,8 +184,11 @@ class _TextPromptDialogState extends State<TextPromptDialog> {
         autofocus: true,
         minLines: 1,
         maxLines: widget.maxLines,
+        maxLength: widget.maxLength,
         style: const TextStyle(color: AppColors.textPrimary),
-        decoration: communityFieldDecoration(widget.hint ?? ''),
+        decoration: communityFieldDecoration(widget.hint ?? '').copyWith(
+          counterStyle: const TextStyle(color: AppColors.textSecondary),
+        ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),

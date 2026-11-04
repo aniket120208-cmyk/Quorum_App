@@ -14,6 +14,7 @@ import 'package:quorum_app/models/saved_item_models.dart';
 import 'package:quorum_app/widgets/copyable_id_tile.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
 import 'community_invite_screen.dart';
+import 'community_join_requests_screen.dart';
 import 'community_members_search.dart';
 import 'community_widgets.dart';
 import 'post_comments_screen.dart';
@@ -639,6 +640,15 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
     _reloadDetail();
   }
 
+  Future<void> _openJoinRequests() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CommunityJoinRequestsScreen(communityId: _id, communityName: _name),
+      ),
+    );
+    _reloadDetail();
+  }
+
   Future<void> _openInvite() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -1069,6 +1079,8 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                     _openMembers();
                   case 'invite':
                     _openInvite();
+                  case 'requests':
+                    _openJoinRequests();
                   case 'edit':
                     _editCommunity();
                   case 'leave':
@@ -1086,6 +1098,11 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                   const PopupMenuItem(
                     value: 'invite',
                     child: Text('Invite people', style: TextStyle(color: AppColors.textPrimary)),
+                  ),
+                if (canModerate(_role))
+                  const PopupMenuItem(
+                    value: 'requests',
+                    child: Text('Join requests', style: TextStyle(color: AppColors.textPrimary)),
                   ),
                 if (canModerate(_role))
                   const PopupMenuItem(

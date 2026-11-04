@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/community_repository.dart';
+import 'package:quorum_app/api/notification_service.dart';
 import 'package:quorum_app/models/community_models.dart';
+import 'package:quorum_app/models/notification_models.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
 import 'package:quorum_app/screens/community_screen/communtiy_details_screen.dart';
+import 'community_discover_screen.dart';
 import 'community_widgets.dart';
 
 enum _Filter { all, owned, member }
@@ -29,11 +33,28 @@ class _CommunityScreenState extends State<CommunityScreen> {
   bool _loading = true;
   String? _error;
   _Filter _filter = _Filter.all;
+  StreamSubscription<NotificationItem>? _notificationSub;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _notificationSub = NotificationService.instance.incoming.listen((n) {
+      if (n.type == NotificationType.communityJoinAccepted) _load(silent: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _notificationSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _discover() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const CommunityDiscoverScreen()),
+    );
+    if (mounted) _load(silent: true);
   }
 
   Future<void> _load({bool silent = false}) async {
@@ -198,6 +219,11 @@ class _CommunityScreenState extends State<CommunityScreen> {
                 ),
               ],
             ),
+          ),
+          IconButton(
+            tooltip: 'Discover communities',
+            onPressed: _discover,
+            icon: const Icon(Icons.search, color: violetLight, size: 22),
           ),
           IconButton(
             tooltip: 'Join with link',
