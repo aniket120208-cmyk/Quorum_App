@@ -48,6 +48,7 @@ class MeetingService extends ChangeNotifier {
   bool isHost;
   final RTCVideoRenderer localRenderer = RTCVideoRenderer();
   final StreamController<String> _notices = StreamController<String>.broadcast();
+  final StreamController<MeetingReaction> _reactions = StreamController<MeetingReaction>.broadcast();
   io.Socket? _socket;
   MediaStream? _localStream;
   MediaStreamTrack? _cameraTrack;
@@ -86,9 +87,14 @@ class MeetingService extends ChangeNotifier {
   bool _chatOpen = false;
   bool _tornDown = false;
   bool _disposed = false;
+  bool _handRaised = false;
+  int _selfReactionAcked = 0;
+  int _selfReactionEchoed = 0;
   int _unreadChat = 0;
 
   Stream<String> get notices => _notices.stream;
+  Stream<MeetingReaction> get reactions => _reactions.stream;
+  bool get isHandRaised => _handRaised;
   MeetingPhase get phase => _phase;
   String? get message => _message;
   bool get isMuted => _isMuted;
@@ -480,6 +486,41 @@ class MeetingService extends ChangeNotifier {
       if (m == null) return;
       _addChat(MeetingChatMessage.fromJson(m));
     });
+    s.on('meeting:reaction', (d) {
+      final m = asMap(d);
+      if (m == null) return;
+      final reaction = MeetingReaction.fromJson(m);
+      if (reaction.emoji.isEmpty) return;
+      if (reaction.userId == userId) {
+        if (_selfReactionAcked > 0) {
+          _selfReactionAcked--;
+          return;
+        }
+        _selfReactionEchoed++;
+      }
+      _pushReaction(reaction);
+    });
+    s.on('meeting:hand-raise-status', (d) {
+      final m = asMap(d);
+      if (m == null) return;
+      final id = (m['userId'] ?? '').toString();
+      final raised = m['isHandRaised'] == true;
+      if (id == userId) {
+        if (_handRaised != raised) {
+          _handRaised = raised;
+          _notify();
+        }
+        return;
+      }
+      final peer = _peers[id];
+      if (peer == null || peer.isHandRaised == raised) return;
+      peer.isHandRaised = raised;
+      if (raised) {
+        final name = (m['userName'] ?? '').toString();
+        _notice('${name.isEmpty ? peer.name : name} raised their hand');
+      }
+      _notify();
+    });
     s.on('meeting:ended', (d) {
       final text = asMap(d)?['message']?.toString() ?? 'The meeting has been ended by the host';
       _finish(MeetingPhase.ended, text);
@@ -643,6 +684,7 @@ class MeetingService extends ChangeNotifier {
       if (name.isNotEmpty) peer.name = name;
       if (item.containsKey('isMuted')) peer.isMuted = item['isMuted'] == true;
       if (item.containsKey('isVideoOff')) peer.isVideoOff = item['isVideoOff'] == true;
+      if (item.containsKey('isHandRaised')) peer.isHandRaised = item['isHandRaised'] == true;
       if (item.containsKey('isScreenSharing')) {
         final sharing = item['isScreenSharing'] == true;
         if (peer.isScreenSharing != sharing) {
@@ -932,6 +974,45 @@ class MeetingService extends ChangeNotifier {
     }
   }
 
+  void _pushReaction(MeetingReaction reaction) {
+    if (!_disposed && !_reactions.isClosed) _reactions.add(reaction);
+  }
+
+  void sendReaction(String emoji) {
+    final socket = _socket;
+    if (!_inCall || socket == null || !socket.connected) {
+      _notice('Not connected to the meeting');
+      return;
+    }
+    socket.emitWithAck('meeting:reaction', {'meetingCode': meetingCode, 'emoji': emoji}, ack: (raw) {
+      final res = asMap(raw);
+      if (res != null && res['success'] != true) {
+        _notice((res['message'] ?? 'Reaction could not be sent').toString());
+        return;
+      }
+      if (_selfReactionEchoed > 0) {
+        _selfReactionEchoed--;
+        return;
+      }
+      _selfReactionAcked++;
+      _pushReaction(MeetingReaction(
+        userId: userId,
+        userName: userName,
+        emoji: emoji,
+        timestamp: DateTime.now(),
+      ));
+    });
+  }
+
+  void toggleHand() {
+    final socket = _socket;
+    if (!_inCall || socket == null || !socket.connected) return;
+    final next = !_handRaised;
+    _handRaised = next;
+    _notify();
+    socket.emit('meeting:toggle-hand', {'meetingCode': meetingCode, 'isHandRaised': next});
+  }
+
   void _addChat(MeetingChatMessage msg) {
     if (msg.senderId == userId) {
       final duplicate = _chat.any((c) =>
@@ -1106,6 +1187,7 @@ class MeetingService extends ChangeNotifier {
     _disposed = true;
     unawaited(_teardown());
     _notices.close();
+    _reactions.close();
     super.dispose();
   }
 }

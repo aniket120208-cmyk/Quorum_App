@@ -16,6 +16,7 @@ import 'package:quorum_app/screens/whiteboard_screen/meeting_whiteboard_sheet.da
 import 'package:quorum_app/screens/whiteboard_screen/whiteboard_screen.dart';
 import 'widgets/call_action_button.dart';
 import 'widgets/draggable_pip_view.dart';
+import 'widgets/floating_reactions.dart';
 
 enum _Phase { lobby, joining, waiting, inCall, leaving }
 
@@ -370,6 +371,28 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 },
               ),
               ListTile(
+                leading: const Icon(Icons.emoji_emotions_outlined, color: Colors.white),
+                title: const Text('React', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _showReactions();
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  _svc.isHandRaised ? Icons.back_hand_rounded : Icons.back_hand_outlined,
+                  color: _svc.isHandRaised ? const Color(0xFFF59E0B) : Colors.white,
+                ),
+                title: Text(
+                  _svc.isHandRaised ? 'Lower hand' : 'Raise hand',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _svc.toggleHand();
+                },
+              ),
+              ListTile(
                 leading: Icon(
                   _svc.isScreenSharing ? Icons.stop_screen_share_rounded : Icons.screen_share_rounded,
                   color: _svc.isScreenSharing ? Colors.redAccent : Colors.white,
@@ -406,6 +429,60 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       ),
     );
     _showControls();
+  }
+
+  Future<void> _showReactions() async {
+    _hideTimer?.cancel();
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  for (final emoji in meetingReactionEmojis)
+                    InkResponse(
+                      radius: 28,
+                      onTap: () {
+                        Navigator.of(ctx).pop();
+                        _svc.sendReaction(emoji);
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: Text(emoji, style: const TextStyle(fontSize: 32)),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    _showControls();
+  }
+
+  Widget _handBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF59E0B),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: const Text('✋', style: TextStyle(fontSize: 14)),
+    );
   }
 
   Future<void> _showChat() async {
@@ -473,11 +550,17 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                     style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.white),
                   ),
                   const SizedBox(height: 12),
-                  _participantTile('You', muted: _svc.isMuted, subtitle: _svc.isHost ? 'Host' : null),
+                  _participantTile(
+                    'You',
+                    muted: _svc.isMuted,
+                    subtitle: _svc.isHost ? 'Host' : null,
+                    handRaised: _svc.isHandRaised,
+                  ),
                   for (final p in people)
                     _participantTile(
                       p.name,
                       muted: p.isMuted,
+                      handRaised: p.isHandRaised,
                       onMute: _svc.isHost && !p.isMuted ? () => _svc.muteParticipant(p.userId) : null,
                     ),
                   if (people.isEmpty)
@@ -519,7 +602,13 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     _showControls();
   }
 
-  Widget _participantTile(String name, {bool muted = false, String? subtitle, VoidCallback? onMute}) {
+  Widget _participantTile(
+    String name, {
+    bool muted = false,
+    bool handRaised = false,
+    String? subtitle,
+    VoidCallback? onMute,
+  }) {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: CircleAvatar(
@@ -528,14 +617,20 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       ),
       title: Text(name, style: const TextStyle(color: Colors.white)),
       subtitle: subtitle == null ? null : Text(subtitle, style: const TextStyle(color: Colors.white54)),
-      trailing: IconButton(
-        onPressed: onMute,
-        tooltip: onMute == null ? null : 'Mute participant',
-        icon: Icon(
-          muted ? Icons.mic_off_rounded : Icons.mic_rounded,
-          color: muted ? Colors.redAccent : Colors.white54,
-          size: 20,
-        ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (handRaised) const Text('✋', style: TextStyle(fontSize: 18)),
+          IconButton(
+            onPressed: onMute,
+            tooltip: onMute == null ? null : 'Mute participant',
+            icon: Icon(
+              muted ? Icons.mic_off_rounded : Icons.mic_rounded,
+              color: muted ? Colors.redAccent : Colors.white54,
+              size: 20,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -572,6 +667,23 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   }
 
   Widget _selfView() {
+    final raised = _svcOrNull?.isHandRaised == true;
+    final padTop = MediaQuery.of(context).padding.top;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        _selfBase(),
+        if (raised)
+          Positioned(
+            top: _remote.isEmpty ? padTop + 64 : 10,
+            left: 10,
+            child: _handBadge(),
+          ),
+      ],
+    );
+  }
+
+  Widget _selfBase() {
     final svc = _svcOrNull;
     if (svc != null && !_cameraOff) {
       return RTCVideoView(
@@ -821,6 +933,12 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           ),
         if (joining) _buildJoiningOverlay(),
         if (inCall) ...[
+          Positioned.fill(
+            child: Padding(
+              padding: EdgeInsets.only(top: pad.top + 70, bottom: pad.bottom + 110),
+              child: FloatingReactions(stream: _svc.reactions, selfId: CurrentUser.id),
+            ),
+          ),
           Positioned(
             top: pad.top + 8,
             left: 16,
@@ -1240,6 +1358,12 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               right: 12,
               bottom: rounded ? 10 : 130,
               child: const Icon(Icons.mic_off_rounded, color: Colors.redAccent, size: 18),
+            ),
+          if (p.isHandRaised)
+            Positioned(
+              top: rounded ? 10 : MediaQuery.of(context).padding.top + 70,
+              left: 10,
+              child: _handBadge(),
             ),
         ],
       ),
