@@ -13,8 +13,11 @@ import 'package:quorum_app/models/chat_models.dart';
 import 'package:quorum_app/models/saved_item_models.dart';
 import 'attachment_widgets.dart';
 import 'chat_widgets.dart';
+import 'forward_screen.dart';
 import 'group_info_screen.dart';
 import 'mention_widgets.dart';
+import 'rich_chat_widgets.dart';
+import 'voice_widgets.dart';
 
 const int _maxMessageLength = 20000;
 const int _counterThreshold = 1000;
@@ -69,6 +72,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   List<ChatUser> _suggestions = [];
   int _mentionStart = -1;
 
+  ChatMessage? _replyTo;
+  final List<String> _selectedIds = [];
+  final VoiceRecorderController _recorder = VoiceRecorderController();
+  bool _recording = false;
+  bool get _selecting => _selectedIds.isNotEmpty;
+
   static const Color darkBg = Color(0xFF0F101A);
   static const Color primary = Color(0xFF6366F1);
   static const Color surface = Color(0xFF1E293B);
@@ -89,6 +98,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _socket.on('message:read', _onRead);
     _socket.on('message:updated', _onMessageEdited);
     _socket.on('message:deleted', _onMessageDeleted);
+    _socket.on('message:reaction_updated', _onReactionUpdated);
     _socket.on('typing:start', _onTypingStart);
     _socket.on('typing:stop', _onTypingStop);
     _socket.on('conversation:removed', _onRemoved);
@@ -114,11 +124,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _socket.off('message:read', _onRead);
     _socket.off('message:updated', _onMessageEdited);
     _socket.off('message:deleted', _onMessageDeleted);
+    _socket.off('message:reaction_updated', _onReactionUpdated);
     _socket.off('typing:start', _onTypingStart);
     _socket.off('typing:stop', _onTypingStop);
     _socket.off('conversation:removed', _onRemoved);
     _socket.off('conversation:update', _onConversationUpdate);
     _socket.off('connect', _onReconnect);
+    _recorder.dispose();
     _inputCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
@@ -354,6 +366,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
+  QuotedReply? _quoteOf(ChatMessage? m) {
+    if (m == null) return null;
+    return QuotedReply(
+      id: m.id,
+      content: m.text,
+      fileUrl: m.fileUrl,
+      fileType: m.fileType,
+      fileName: m.fileName,
+      audioDuration: m.audioDuration,
+      isDeleted: m.isDeleted,
+      senderId: m.senderId,
+      senderName: m.senderName,
+      senderAvatar: m.senderAvatar,
+    );
+  }
+
   void _send() {
     final text = _inputCtrl.text.trim();
     if (text.isEmpty) return;
@@ -361,6 +389,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _inputCtrl.clear();
     _stopTyping();
     final id = _newTempId();
+    final reply = _replyTo;
     final temp = ChatMessage(
       id: id,
       clientMessageId: id,
@@ -370,8 +399,72 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       createdAt: DateTime.now(),
       status: MessageStatus.sending,
       mentionedUserIds: mentionIds,
+      replyToId: reply?.id,
+      replyTo: _quoteOf(reply),
     );
-    setState(() => _messages.insert(0, temp));
+    setState(() {
+      _messages.insert(0, temp);
+      _replyTo = null;
+    });
+    _scrollToNewest();
+    _dispatch(id);
+  }
+
+  Future<void> _startRecording() async {
+    _stopTyping();
+    try {
+      final ok = await _recorder.start();
+      if (!mounted) return;
+      if (!ok) {
+        showErrorSnack(context, 'Microphone permission is required to record voice messages');
+        return;
+      }
+      setState(() => _recording = true);
+    } catch (e) {
+      if (mounted) showErrorSnack(context, errorText(e));
+    }
+  }
+
+  Future<void> _cancelRecording() async {
+    await _recorder.cancel();
+    if (mounted) setState(() => _recording = false);
+  }
+
+  Future<void> _sendRecording() async {
+    final rec = await _recorder.stop();
+    if (!mounted) return;
+    setState(() => _recording = false);
+    if (rec == null) {
+      showInfoSnack(context, 'Recording was too short');
+      return;
+    }
+    _startVoiceUpload(rec);
+  }
+
+  void _startVoiceUpload(VoiceRecording rec) {
+    final id = _newTempId();
+    final reply = _replyTo;
+    final temp = ChatMessage(
+      id: id,
+      clientMessageId: id,
+      senderId: _me,
+      senderName: widget.currentUserName,
+      fileType: 'voice',
+      fileName: 'voice_note.m4a',
+      localPath: rec.path,
+      fileSize: rec.sizeBytes,
+      audioDuration: rec.durationSeconds,
+      audioWaveform: rec.waveform,
+      uploadProgress: 0,
+      createdAt: DateTime.now(),
+      status: MessageStatus.uploading,
+      replyToId: reply?.id,
+      replyTo: _quoteOf(reply),
+    );
+    setState(() {
+      _messages.insert(0, temp);
+      _replyTo = null;
+    });
     _scrollToNewest();
     _dispatch(id);
   }
@@ -436,6 +529,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _inputCtrl.clear();
     _stopTyping();
     final id = _newTempId();
+    final reply = _replyTo;
     final temp = ChatMessage(
       id: id,
       clientMessageId: id,
@@ -449,8 +543,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       uploadProgress: 0,
       createdAt: DateTime.now(),
       status: MessageStatus.uploading,
+      replyToId: reply?.id,
+      replyTo: _quoteOf(reply),
     );
-    setState(() => _messages.insert(0, temp));
+    setState(() {
+      _messages.insert(0, temp);
+      _replyTo = null;
+    });
     _scrollToNewest();
     _dispatch(id);
   }
@@ -463,17 +562,26 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     if (m.fileUrl == null && m.localPath != null) {
       _update(id, (x) => x.copyWith(status: MessageStatus.uploading, uploadProgress: 0));
       var last = 0.0;
+      void progress(double p) {
+        if (p - last >= 0.02 || p >= 1) {
+          last = p;
+          _update(id, (x) => x.copyWith(uploadProgress: p));
+        }
+      }
+
       try {
-        final res = await UploadService.instance.upload(
-          path: m.localPath!,
-          fileName: m.attachmentName,
-          onProgress: (p) {
-            if (p - last >= 0.02 || p >= 1) {
-              last = p;
-              _update(id, (x) => x.copyWith(uploadProgress: p));
-            }
-          },
-        );
+        final res = m.isVoice
+            ? await UploadService.instance.uploadVoice(
+                conversationId: _convId,
+                path: m.localPath!,
+                fileName: m.attachmentName,
+                onProgress: progress,
+              )
+            : await UploadService.instance.upload(
+                path: m.localPath!,
+                fileName: m.attachmentName,
+                onProgress: progress,
+              );
         if (!mounted) return;
         _update(id, (x) => x.copyWith(fileUrl: res.url, fileType: res.fileType));
       } catch (e) {
@@ -495,10 +603,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _socket.emitAck('message:send', {
       'conversationId': _convId,
       'clientMessageId': id,
-      if (m.text.isNotEmpty) 'content': m.text,
+      if (m.text.isNotEmpty || m.isVoice) 'content': m.text,
       if (m.mentionedUserIds.isNotEmpty) 'mentions': m.mentionedUserIds,
+      if (m.replyToId != null) 'replyToId': m.replyToId,
       if (m.fileUrl != null) 'fileUrl': m.fileUrl,
       if (m.fileUrl != null) 'fileType': m.fileType ?? 'file',
+      if (m.isVoice) ...{
+        'fileName': m.attachmentName,
+        if (m.fileSize != null) 'fileSize': m.fileSize,
+        'audioDuration': m.audioDuration ?? 0,
+        'audioWaveform': m.audioWaveform,
+      },
     }, (res) {
       if (!mounted) return;
       if (res != null && res['success'] == true && res['data'] is Map) {
@@ -511,7 +626,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             real = real.copyWith(senderId: _me, senderName: widget.currentUserName);
           }
           if (old != null) {
-            real = real.copyWith(localPath: old.localPath, fileName: old.fileName);
+            real = real.copyWith(
+              localPath: old.localPath,
+              fileName: real.fileName ?? old.fileName,
+              replyTo: real.replyTo ?? old.replyTo,
+              replyToId: real.replyToId ?? old.replyToId,
+              audioWaveform: real.audioWaveform.isEmpty ? old.audioWaveform : real.audioWaveform,
+              audioDuration: real.audioDuration ?? old.audioDuration,
+            );
             if (real.mentionedUserIds.isEmpty && old.mentionedUserIds.isNotEmpty) {
               real = real.copyWith(mentionedUserIds: old.mentionedUserIds);
             }
@@ -596,7 +718,133 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     if (conv.isNotEmpty && conv != _convId) return;
     final id = (j['messageId'] ?? j['id'] ?? '').toString();
     if (id.isEmpty) return;
-    setState(() => _messages.removeWhere((x) => x.id == id));
+    final forMe = j['deletedForMe'] == true || j['deleteForEveryone'] == false;
+    if (forMe) {
+      setState(() {
+        _messages.removeWhere((x) => x.id == id);
+        _selectedIds.remove(id);
+      });
+      return;
+    }
+    _markDeleted(id);
+  }
+
+  void _markDeleted(String id) {
+    if (!mounted) return;
+    setState(() {
+      _messages = _messages.map((x) {
+        if (x.id == id) return x.asDeleted();
+        final quoted = x.replyTo;
+        if (quoted != null && quoted.id == id) return x.copyWith(replyTo: quoted.asDeleted());
+        return x;
+      }).toList();
+      _selectedIds.remove(id);
+      if (_replyTo?.id == id) _replyTo = null;
+    });
+  }
+
+  void _onReactionUpdated(dynamic data) {
+    final j = asMap(data);
+    if (j == null || !mounted) return;
+    final conv = (j['conversationId'] ?? '').toString();
+    if (conv.isNotEmpty && conv != _convId) return;
+    final id = (j['messageId'] ?? '').toString();
+    if (id.isEmpty) return;
+    final groups = MessageReactionGroup.listFrom(j['reactions']);
+    _update(id, (x) => x.copyWith(reactions: groups));
+  }
+
+  Future<T> _socketOrRest<T>(
+    String event,
+    Map<String, dynamic> data,
+    T Function(Map<String, dynamic> res) fromAck,
+    Future<T> Function() rest,
+  ) async {
+    final completer = Completer<Map<String, dynamic>?>();
+    final started = DateTime.now();
+    _socket.emitAck(event, data, completer.complete);
+    final res = await completer.future;
+    if (res == null) {
+      if (DateTime.now().difference(started) > const Duration(seconds: 5)) {
+        throw ApiException('The request timed out. Please try again.');
+      }
+      return rest();
+    }
+    if (res['success'] != true) {
+      throw ApiException((res['message'] ?? 'Something went wrong').toString());
+    }
+    return fromAck(res);
+  }
+
+  Future<void> _react(ChatMessage m, String emoji) async {
+    if (m.isDeleted || m.id.startsWith(_tmp)) return;
+    final before = m.reactions;
+    final me = ChatUser(id: _me, name: widget.currentUserName);
+    _update(m.id, (x) => x.copyWith(reactions: toggleReaction(before, me, emoji)));
+    try {
+      final groups = await _socketOrRest<List<MessageReactionGroup>>(
+        'message:react',
+        {'conversationId': _convId, 'messageId': m.id, 'emoji': emoji},
+        (res) {
+          final d = res['data'];
+          return MessageReactionGroup.listFrom(d is Map ? d['reactions'] : null);
+        },
+        () => _repo.reactToMessage(_convId, m.id, emoji),
+      );
+      if (mounted) _update(m.id, (x) => x.copyWith(reactions: groups));
+    } catch (e) {
+      if (!mounted) return;
+      _update(m.id, (x) => x.copyWith(reactions: before));
+      showErrorSnack(context, errorText(e));
+    }
+  }
+
+  Future<void> _openForward(List<String> ids) async {
+    if (ids.isEmpty) return;
+    final targets = await Navigator.of(context).push<List<String>>(
+      MaterialPageRoute(
+        builder: (_) => ForwardScreen(currentUserId: _me, messageCount: ids.length),
+      ),
+    );
+    if (targets == null || targets.isEmpty || !mounted) return;
+    setState(_selectedIds.clear);
+    try {
+      await _socketOrRest<void>(
+        'message:forward',
+        {'messageIds': ids, 'targetConversationIds': targets},
+        (_) {},
+        () => _repo.forwardMessages(ids, targets),
+      );
+      if (mounted) showInfoSnack(context, ids.length == 1 ? 'Message forwarded' : 'Messages forwarded');
+    } catch (e) {
+      if (mounted) showErrorSnack(context, errorText(e));
+    }
+  }
+
+  bool _forwardable(ChatMessage m) =>
+      !m.isDeleted && !m.id.startsWith(_tmp) && m.status == MessageStatus.sent;
+
+  void _forwardSelected() {
+    final ids = _selectedIds.where((id) {
+      final hit = _messages.where((m) => m.id == id);
+      return hit.isNotEmpty && _forwardable(hit.first);
+    }).toList();
+    if (ids.isEmpty) {
+      showInfoSnack(context, 'These messages cannot be forwarded');
+      return;
+    }
+    _openForward(ids);
+  }
+
+  void _toggleSelect(ChatMessage m) {
+    if (m.id.startsWith(_tmp)) return;
+    setState(() {
+      if (_selectedIds.contains(m.id)) {
+        _selectedIds.remove(m.id);
+      } else {
+        _selectedIds.add(m.id);
+      }
+    });
   }
 
   void _onRemoved(dynamic data) {
@@ -715,93 +963,139 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   Future<void> _deleteMessage(ChatMessage m) async {
-    final ok = await showDialog<bool>(
+    final canEveryone = !m.isDeleted && (m.senderId == _me || (_conv.isGroup && _conv.adminId == _me));
+    final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: surface,
         title: const Text('Delete message?', style: TextStyle(color: textPrimary)),
-        content: const Text(
-          'This message will be deleted for everyone in this chat.',
-          style: TextStyle(color: textSecondary),
+        content: Text(
+          canEveryone
+              ? 'You can delete this message for everyone, or only remove it from your own view.'
+              : 'This message will be removed only from your view.',
+          style: const TextStyle(color: textSecondary),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'me'), child: const Text('Delete for me')),
+          if (canEveryone)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'everyone'),
+              child: const Text('Delete for everyone', style: TextStyle(color: Colors.redAccent)),
+            ),
         ],
       ),
     );
-    if (ok != true || !mounted) return;
-    setState(() => _messages.removeWhere((x) => x.id == m.id));
+    if (choice == null || !mounted) return;
+    final everyone = choice == 'everyone';
+    final snapshot = List<ChatMessage>.of(_messages);
+    if (everyone) {
+      _markDeleted(m.id);
+    } else {
+      setState(() {
+        _messages.removeWhere((x) => x.id == m.id);
+        _selectedIds.remove(m.id);
+      });
+    }
     try {
-      await ChatRepository.instance.deleteMessage(_convId, m.id);
+      await _socketOrRest<void>(
+        'message:delete',
+        {'conversationId': _convId, 'messageId': m.id, 'deleteForEveryone': everyone},
+        (_) {},
+        () => _repo.deleteMessage(_convId, m.id, forEveryone: everyone),
+      );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _messages = _merge(_messages, [m]));
+      setState(() => _messages = snapshot);
       showErrorSnack(context, errorText(e));
     }
   }
 
   Future<void> _showMessageActions(ChatMessage m) async {
     if (m.id.startsWith(_tmp) || m.status != MessageStatus.sent) return;
+    HapticFeedback.mediumImpact();
+    final deleted = m.isDeleted;
     final type = m.fileUrl != null ? SavedItemType.file : SavedItemType.message;
     final saved = SavedItemsStore.instance.isSaved(type, m.id);
     final mine = m.senderId == _me;
-    final canDelete = mine || (_conv.isGroup && _conv.adminId == _me);
+    final editable = mine &&
+        !deleted &&
+        !m.isVoice &&
+        m.text.isNotEmpty &&
+        DateTime.now().difference(m.createdAt) < const Duration(hours: 24);
+    final myGroups = m.reactions.where((g) => g.reactedBy(_me));
+    final myReaction = myGroups.isEmpty ? null : myGroups.first.emoji;
+
+    Widget tile(IconData icon, String label, String value, BuildContext ctx, {Color color = textPrimary}) {
+      return ListTile(
+        leading: Icon(icon, color: color),
+        title: Text(label, style: TextStyle(color: color)),
+        onTap: () => Navigator.pop(ctx, value),
+      );
+    }
+
     final choice = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: surface,
+      isScrollControlled: true,
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (m.text.isNotEmpty)
-              ListTile(
-                leading: const Icon(Icons.copy_rounded, color: textPrimary),
-                title: const Text('Copy text', style: TextStyle(color: textPrimary)),
-                onTap: () => Navigator.pop(ctx, 'copy'),
-              ),
-            ListTile(
-              leading: Icon(saved ? Icons.bookmark_remove_outlined : Icons.bookmark_add_outlined, color: textPrimary),
-              title: Text(
-                saved ? 'Remove from saved' : (type == SavedItemType.file ? 'Save file' : 'Save message'),
-                style: const TextStyle(color: textPrimary),
-              ),
-              onTap: () => Navigator.pop(ctx, 'save'),
-            ),
-            if (mine && m.text.isNotEmpty)
-              ListTile(
-                leading: const Icon(Icons.edit_outlined, color: textPrimary),
-                title: const Text('Edit message', style: TextStyle(color: textPrimary)),
-                onTap: () => Navigator.pop(ctx, 'edit'),
-              ),
-            if (canDelete)
-              ListTile(
-                leading: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
-                title: const Text('Delete message', style: TextStyle(color: Colors.redAccent)),
-                onTap: () => Navigator.pop(ctx, 'delete'),
-              ),
-          ],
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!deleted) ...[
+                ReactionPickerRow(selected: myReaction, onPick: (e) => Navigator.pop(ctx, 'react:$e')),
+                const Divider(height: 1, color: surfaceBorder),
+                tile(Icons.reply_rounded, 'Reply', 'reply', ctx),
+              ],
+              if (!deleted && m.reactions.isNotEmpty)
+                tile(Icons.emoji_emotions_outlined, 'View reactions', 'reactions', ctx),
+              if (!deleted && m.text.isNotEmpty) tile(Icons.copy_rounded, 'Copy text', 'copy', ctx),
+              if (!deleted) tile(Icons.shortcut_rounded, 'Forward', 'forward', ctx),
+              tile(Icons.check_circle_outline_rounded, 'Select', 'select', ctx),
+              if (!deleted)
+                tile(
+                  saved ? Icons.bookmark_remove_outlined : Icons.bookmark_add_outlined,
+                  saved ? 'Remove from saved' : (type == SavedItemType.file ? 'Save file' : 'Save message'),
+                  'save',
+                  ctx,
+                ),
+              if (editable) tile(Icons.edit_outlined, 'Edit message', 'edit', ctx),
+              tile(Icons.delete_outline_rounded, 'Delete message', 'delete', ctx, color: Colors.redAccent),
+            ],
+          ),
         ),
       ),
     );
     if (!mounted || choice == null) return;
-    if (choice == 'edit') {
-      await _editMessage(m);
+    if (choice.startsWith('react:')) {
+      await _react(m, choice.substring(6));
       return;
     }
-    if (choice == 'delete') {
-      await _deleteMessage(m);
-      return;
+    switch (choice) {
+      case 'reply':
+        setState(() => _replyTo = m);
+      case 'reactions':
+        await showReactorsSheet(
+          context,
+          m.reactions,
+          _me,
+          onRemoveMine: (e) => _react(m, e),
+        );
+      case 'copy':
+        await Clipboard.setData(ClipboardData(text: m.text));
+        if (mounted) showInfoSnack(context, 'Copied');
+      case 'forward':
+        await _openForward([m.id]);
+      case 'select':
+        setState(() => _selectedIds.add(m.id));
+      case 'edit':
+        await _editMessage(m);
+      case 'delete':
+        await _deleteMessage(m);
+      case 'save':
+        await _toggleSave(type, m.id);
     }
-    if (choice == 'copy') {
-      await Clipboard.setData(ClipboardData(text: m.text));
-      if (mounted) showInfoSnack(context, 'Copied');
-      return;
-    }
-    await _toggleSave(type, m.id);
   }
 
   Future<void> _openGroupInfo() async {
@@ -821,6 +1115,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
     final c = result.conversation;
     if (c != null) setState(() => _conv = c);
+  }
+
+  String? _avatarFor(ChatMessage m) {
+    final own = m.senderAvatar;
+    if (own != null && own.isNotEmpty) return own;
+    for (final u in _conv.members) {
+      if (u.id == m.senderId && u.avatarUrl != null && u.avatarUrl!.isNotEmpty) return u.avatarUrl;
+    }
+    if (!_conv.isGroup && m.senderId != _me) return _conv.directAvatar;
+    return null;
+  }
+
+  String _nameFor(ChatMessage m) {
+    if (m.senderName.isNotEmpty) return m.senderName;
+    for (final u in _conv.members) {
+      if (u.id == m.senderId) return u.name;
+    }
+    return _conv.directName ?? '';
   }
 
   bool _isSameDay(DateTime a, DateTime b) =>
@@ -890,6 +1202,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         final showSender = _conv.isGroup && !isMe && startsRun;
         final canRetry =
             m.status == MessageStatus.failed || m.status == MessageStatus.uploadFailed;
+        final topGap = (older == null || showDay) ? 4.0 : (startsRun ? 14.0 : 5.0);
 
         return Column(
           key: m.id == _jumpTargetId ? _targetKey : null,
@@ -900,11 +1213,29 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               isMe: isMe,
               highlighted: m.id == _highlightId,
               showSender: showSender,
+              showAvatar: !isMe && startsRun && !_conv.isGroup,
+              leadingAvatar: !_conv.isGroup,
+              avatarUrl: _avatarFor(m),
+              avatarName: _nameFor(m),
+              topGap: topGap,
               senderEmail: showSender ? _emailFor(m) : null,
-              showTime: endsRun,
+              showTime: true,
               timeText: _formatClock(m.createdAt),
-              onRetry: canRetry ? () => _dispatch(m.id) : null,
-              onLongPress: () => _showMessageActions(m),
+              selecting: _selecting,
+              selected: _selectedIds.contains(m.id),
+              onRetry: canRetry && !_selecting ? () => _dispatch(m.id) : null,
+              onTap: _selecting ? () => _toggleSelect(m) : null,
+              onLongPress: () => _selecting ? _toggleSelect(m) : _showMessageActions(m),
+              onReply: () => setState(() => _replyTo = m),
+              onReact: (emoji) => _react(m, emoji),
+              onReactors: (groups, emoji) => showReactorsSheet(
+                context,
+                groups,
+                _me,
+                initialEmoji: emoji,
+                onRemoveMine: (e) => _react(m, e),
+              ),
+              onOpenReply: m.replyTo == null ? null : () => _jumpToMessage(m.replyTo!.id),
               members: _conv.members,
               myId: _me,
             ),
@@ -914,14 +1245,127 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
+  PreferredSizeWidget _selectionBar() {
+    return AppBar(
+      backgroundColor: darkBg,
+      elevation: 0,
+      iconTheme: const IconThemeData(color: textPrimary),
+      titleSpacing: 0,
+      leading: IconButton(
+        tooltip: 'Cancel selection',
+        icon: const Icon(Icons.close_rounded),
+        onPressed: () => setState(_selectedIds.clear),
+      ),
+      title: Text(
+        '${_selectedIds.length} selected',
+        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: textPrimary),
+      ),
+      actions: [
+        IconButton(
+          tooltip: 'Forward',
+          icon: const Icon(Icons.shortcut_rounded),
+          onPressed: _forwardSelected,
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !_selecting,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _selecting) setState(_selectedIds.clear);
+      },
+      child: _buildScaffold(context),
+    );
+  }
+
+  Widget _buildComposer() {
+    final replying = _replyTo != null && !_recording;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (replying)
+          ReplyComposerPreview(
+            message: _replyTo!,
+            myId: _me,
+            onClose: () => setState(() => _replyTo = null),
+          ),
+        SafeArea(
+          top: false,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(4, 8, 10, 8),
+            decoration: BoxDecoration(
+              color: surface,
+              border: Border(top: BorderSide(color: replying ? Colors.transparent : surfaceBorder)),
+            ),
+            child: _recording
+                ? VoiceRecorderBar(
+                    controller: _recorder,
+                    onCancel: _cancelRecording,
+                    onSend: _sendRecording,
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        tooltip: 'Attach',
+                        icon: const Icon(Icons.attach_file, color: textSecondary),
+                        onPressed: _showAttachMenu,
+                      ),
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          decoration: BoxDecoration(
+                            color: darkBg,
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(color: surfaceBorder),
+                          ),
+                          child: TextField(
+                            controller: _inputCtrl,
+                            minLines: 1,
+                            maxLines: 4,
+                            inputFormatters: [LengthLimitingTextInputFormatter(_maxMessageLength)],
+                            textCapitalization: TextCapitalization.sentences,
+                            style: const TextStyle(color: textPrimary, fontSize: 14),
+                            decoration: const InputDecoration(
+                              hintText: 'Type a message...',
+                              hintStyle: TextStyle(color: textSecondary),
+                              border: InputBorder.none,
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(vertical: 10),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ValueListenableBuilder<TextEditingValue>(
+                        valueListenable: _inputCtrl,
+                        builder: (_, value, __) {
+                          final hasText = value.text.trim().isNotEmpty;
+                          return IconButton(
+                            tooltip: hasText ? 'Send' : 'Record voice message',
+                            icon: Icon(hasText ? Icons.send_rounded : Icons.mic_rounded, color: primary),
+                            onPressed: hasText ? _send : _startRecording,
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context) {
     final title = _conv.titleFor(_me);
     final subtitle = _subtitle;
 
     return Scaffold(
       backgroundColor: darkBg,
-      appBar: AppBar(
+      appBar: _selecting ? _selectionBar() : AppBar(
         backgroundColor: darkBg,
         elevation: 0,
         iconTheme: const IconThemeData(color: textPrimary),
@@ -934,7 +1378,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               ChatAvatar(
                 name: title,
                 isGroup: _conv.isGroup,
-                imageUrl: _conv.isGroup ? _conv.avatar : null,
+                imageUrl: _conv.isGroup ? _conv.avatar : _conv.directAvatar,
                 radius: 18,
               ),
               const SizedBox(width: 12),
@@ -1004,55 +1448,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               );
             },
           ),
-          SafeArea(
-            top: false,
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(4, 8, 10, 8),
-              decoration: const BoxDecoration(
-                color: surface,
-                border: Border(top: BorderSide(color: surfaceBorder)),
-              ),
-              child: Row(
-                children: [
-                  IconButton(
-                    tooltip: 'Attach',
-                    icon: const Icon(Icons.attach_file, color: textSecondary),
-                    onPressed: _showAttachMenu,
-                  ),
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: darkBg,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: surfaceBorder),
-                      ),
-                      child: TextField(
-                        controller: _inputCtrl,
-                        minLines: 1,
-                        maxLines: 4,
-                        inputFormatters: [LengthLimitingTextInputFormatter(_maxMessageLength)],
-                        textCapitalization: TextCapitalization.sentences,
-                        style: const TextStyle(color: textPrimary, fontSize: 14),
-                        decoration: const InputDecoration(
-                          hintText: 'Type a message...',
-                          hintStyle: TextStyle(color: textSecondary),
-                          border: InputBorder.none,
-                          isDense: true,
-                          contentPadding: EdgeInsets.symmetric(vertical: 10),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    icon: const Icon(Icons.send_rounded, color: primary),
-                    onPressed: _send,
-                  ),
-                ],
-              ),
-            ),
-          ),
+          _buildComposer(),
         ],
       ),
     );
@@ -1089,24 +1485,48 @@ class _MessageBubble extends StatelessWidget {
     required this.isMe,
     this.highlighted = false,
     required this.showSender,
+    required this.showAvatar,
+    required this.leadingAvatar,
+    this.avatarUrl,
+    required this.avatarName,
+    required this.topGap,
     required this.showTime,
     required this.timeText,
     required this.members,
     required this.myId,
+    required this.onReact,
+    required this.onReactors,
     this.senderEmail,
+    this.selecting = false,
+    this.selected = false,
     this.onRetry,
+    this.onTap,
     this.onLongPress,
+    this.onReply,
+    this.onOpenReply,
   });
 
   final ChatMessage message;
   final bool isMe;
   final bool highlighted;
   final bool showSender;
+  final bool showAvatar;
+  final bool leadingAvatar;
+  final String? avatarUrl;
+  final String avatarName;
+  final double topGap;
   final String? senderEmail;
   final bool showTime;
   final String timeText;
+  final bool selecting;
+  final bool selected;
   final VoidCallback? onRetry;
+  final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+  final VoidCallback? onReply;
+  final VoidCallback? onOpenReply;
+  final ValueChanged<String> onReact;
+  final void Function(List<MessageReactionGroup> groups, String emoji) onReactors;
   final List<ChatUser> members;
   final String myId;
 
@@ -1118,6 +1538,7 @@ class _MessageBubble extends StatelessWidget {
     final uploadFailed = status == MessageStatus.uploadFailed;
     final uploading = status == MessageStatus.uploading;
     final sending = status == MessageStatus.sending;
+    final deleted = message.isDeleted;
 
     IconData statusIcon() {
       if (failed || uploadFailed) return Icons.error_outline;
@@ -1138,113 +1559,213 @@ class _MessageBubble extends StatelessWidget {
         final p = ((message.uploadProgress ?? 0) * 100).round();
         return 'Uploading $p%';
       }
-      return message.isEdited ? 'edited · $timeText' : timeText;
+      return message.isEdited && !deleted ? 'edited · $timeText' : timeText;
     }
 
     final hasText = message.text.isNotEmpty;
+    final isImage = message.fileType == 'image';
+    final hasHeader = showSender ||
+        message.isForwarded ||
+        message.replyTo != null;
+    final canSwipe = !selecting && status == MessageStatus.sent && !deleted && onReply != null;
+    final maxBubble = MediaQuery.of(context).size.width * 0.72;
 
-    return Align(
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: GestureDetector(
-        onTap: onRetry,
-        onLongPress: onLongPress,
-        child: Column(
-          crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            Container(
-              margin: const EdgeInsets.only(top: 2),
-              padding: message.hasAttachment
-                  ? EdgeInsets.zero
-                  : const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.75,
-              ),
-              decoration: BoxDecoration(
-                color: isMe
-                    ? const Color(0xFF6366F1)
-                    : (mentionsMe ? const Color(0xFF2B2A3D) : const Color(0xFF1E293B)),
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(16),
-                  topRight: const Radius.circular(16),
-                  bottomLeft: Radius.circular(isMe ? 16 : 4),
-                  bottomRight: Radius.circular(isMe ? 4 : 16),
-                ),
-                border: highlighted
-                    ? Border.all(color: mentionAmber, width: 2)
-                    : mentionsMe
-                        ? Border.all(color: mentionAmber.withValues(alpha: 0.6))
-                        : ((isMe || message.hasAttachment) ? null : Border.all(color: const Color(0xFF334155))),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (showSender && message.senderName.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            message.senderName,
-                            style: const TextStyle(
-                              color: Color(0xFF818CF8),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          if (senderEmail != null && senderEmail!.isNotEmpty)
-                            Text(
-                              senderEmail!,
-                              style: const TextStyle(
-                                color: Color(0xFF94A3B8),
-                                fontSize: 10,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  if (message.hasAttachment) AttachmentView(message: message),
-                  if (hasText)
-                    Padding(
-                      padding: message.hasAttachment
-                          ? const EdgeInsets.fromLTRB(14, 8, 14, 8)
-                          : EdgeInsets.zero,
-                      child: MentionText(
-                        text: message.text,
-                        names: mentionNamesFor(message, members),
-                        myNames: myMentionNamesFor(message, members, myId),
-                        isMe: isMe,
-                        style: const TextStyle(color: Color(0xFFF8FAFC), fontSize: 14),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            if (showTime || status != MessageStatus.sent || message.isEdited)
-              Padding(
-                padding: const EdgeInsets.only(top: 2, bottom: 4, left: 4, right: 4),
-                child: Row(
+    final content = <Widget>[
+      if (showSender)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 14, 0),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              ChatAvatar(name: avatarName, imageUrl: avatarUrl, radius: 10),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      statusLabel(),
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: (failed || uploadFailed)
-                            ? Colors.redAccent
-                            : const Color(0xFF94A3B8),
+                      avatarName.isEmpty ? 'Unknown' : avatarName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF818CF8),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                    if (isMe) ...[
-                      const SizedBox(width: 4),
-                      Icon(statusIcon(), size: 13, color: statusColor()),
-                    ],
+                    if (senderEmail != null && senderEmail!.isNotEmpty)
+                      Text(
+                        senderEmail!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10),
+                      ),
                   ],
                 ),
               ),
-          ],
+            ],
+          ),
         ),
+      if (!deleted && message.isForwarded)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+          child: ForwardedLabel(isMe: isMe),
+        ),
+      if (!deleted && message.replyTo != null)
+        QuotedReplyBanner(
+          reply: message.replyTo!,
+          isMe: isMe,
+          myId: myId,
+          onTap: onOpenReply,
+        ),
+      if (deleted)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.block_rounded, size: 15, color: isMe ? Colors.white60 : const Color(0xFF94A3B8)),
+              const SizedBox(width: 6),
+              Text(
+                'This message was deleted',
+                style: TextStyle(
+                  color: isMe ? Colors.white70 : const Color(0xFF94A3B8),
+                  fontSize: 13,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+          ),
+        )
+      else ...[
+        if (message.hasAttachment && message.isVoice)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 10, 14, 6),
+            child: VoiceMessageView(message: message, isMe: isMe),
+          )
+        else if (message.hasAttachment)
+          Padding(
+            padding: isImage
+                ? EdgeInsets.only(top: hasHeader ? 6 : 0)
+                : const EdgeInsets.fromLTRB(12, 10, 12, 6),
+            child: AttachmentView(message: message),
+          ),
+        if (hasText)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+            child: MentionText(
+              text: message.text,
+              names: mentionNamesFor(message, members),
+              myNames: myMentionNamesFor(message, members, myId),
+              isMe: isMe,
+              style: const TextStyle(color: Color(0xFFF8FAFC), fontSize: 14),
+            ),
+          ),
+      ],
+    ];
+
+    final bubble = Container(
+      constraints: BoxConstraints(maxWidth: maxBubble),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: isMe
+            ? const Color(0xFF6366F1)
+            : (mentionsMe ? const Color(0xFF2B2A3D) : const Color(0xFF1E293B)),
+        borderRadius: BorderRadius.circular(16),
+        border: highlighted
+            ? Border.all(color: mentionAmber, width: 2)
+            : mentionsMe
+                ? Border.all(color: mentionAmber.withValues(alpha: 0.6))
+                : ((isMe || (message.hasAttachment && !deleted)) ? null : Border.all(color: const Color(0xFF334155))),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: content,
+      ),
+    );
+
+    final column = Column(
+      crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      children: [
+        bubble,
+        if (!deleted && message.reactions.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: ReactionChips(
+              groups: message.reactions,
+              myId: myId,
+              onTap: onReact,
+              onLongPress: (g) => onReactors(message.reactions, g.emoji),
+            ),
+          ),
+        if (showTime || status != MessageStatus.sent || message.isEdited)
+          Padding(
+            padding: const EdgeInsets.only(top: 3, bottom: 2, left: 4, right: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  statusLabel(),
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: (failed || uploadFailed) ? Colors.redAccent : const Color(0xFF94A3B8),
+                  ),
+                ),
+                if (isMe) ...[
+                  const SizedBox(width: 4),
+                  Icon(statusIcon(), size: 13, color: statusColor()),
+                ],
+              ],
+            ),
+          ),
+      ],
+    );
+
+    return Container(
+      color: selected ? const Color(0xFF6366F1).withValues(alpha: 0.16) : Colors.transparent,
+      padding: EdgeInsets.only(top: topGap),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (selecting)
+            Padding(
+              padding: const EdgeInsets.only(right: 8, top: 8),
+              child: Icon(
+                selected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+                size: 20,
+                color: selected ? const Color(0xFF818CF8) : const Color(0xFF64748B),
+              ),
+            ),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+              children: [
+                if (!isMe && leadingAvatar) ...[
+                  SizedBox(
+                    width: 30,
+                    child: showAvatar ? ChatAvatar(name: avatarName, imageUrl: avatarUrl, radius: 15) : null,
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Flexible(
+                  child: SwipeToReply(
+                    enabled: canSwipe,
+                    onReply: onReply ?? () {},
+                    child: GestureDetector(
+                      onTap: onTap ?? onRetry,
+                      onLongPress: onLongPress,
+                      child: column,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

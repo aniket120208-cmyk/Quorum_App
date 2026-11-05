@@ -234,6 +234,7 @@ class _ChatScreenState extends State<ChatScreen> {
               id: id,
               directName: user.name,
               directEmail: user.email,
+              directAvatar: user.avatarUrl,
               updatedAt: DateTime.now(),
               members: [user],
             );
@@ -581,7 +582,7 @@ class ConversationTile extends StatelessWidget {
       leading: ChatAvatar(
         name: title,
         isGroup: conversation.isGroup,
-        imageUrl: conversation.isGroup ? conversation.avatar : null,
+        imageUrl: conversation.isGroup ? conversation.avatar : conversation.directAvatar,
       ),
       title: Text(
         title,
