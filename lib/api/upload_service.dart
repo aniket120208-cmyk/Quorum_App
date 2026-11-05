@@ -115,4 +115,49 @@ class UploadService {
       throw ApiException(_dioMessage(e), statusCode: e.response?.statusCode);
     }
   }
+
+  Future<UploadResult> uploadVoice({
+    required String conversationId,
+    required String path,
+    required String fileName,
+    void Function(double progress)? onProgress,
+  }) async {
+    final file = File(path);
+    final size = await file.length();
+    if (size > maxFileBytes) throw ApiException(limitMessage('file'));
+    try {
+      final signRes = await ApiClient.instance.dio.post('/api/uploads/sign', data: {
+        'conversationId': conversationId,
+        'fileName': fileName,
+        'fileSize': size,
+        'fileType': 'voice',
+      });
+      final raw = signRes.data['data'] ?? signRes.data;
+      final sig = Map<String, dynamic>.from(raw as Map);
+      final uploadUrl = _pick(sig, ['uploadUrl', 'upload_url']);
+      final fileUrl = _pick(sig, ['fileUrl', 'file_url']);
+      if (uploadUrl.isEmpty || fileUrl.isEmpty) {
+        final fallback = await upload(path: path, fileName: fileName, onProgress: onProgress);
+        return UploadResult(fallback.url, 'voice');
+      }
+      final meta = sig['metadata'] is Map ? Map<String, dynamic>.from(sig['metadata']) : <String, dynamic>{};
+      final contentType = _pick(meta, ['contentType', 'content_type']);
+      await Dio().put(
+        uploadUrl,
+        data: file.openRead(),
+        options: Options(
+          headers: {
+            Headers.contentTypeHeader: contentType.isEmpty ? 'audio/mp4' : contentType,
+            Headers.contentLengthHeader: size,
+          },
+        ),
+        onSendProgress: (sent, total) {
+          if (total > 0) onProgress?.call(sent / total);
+        },
+      );
+      return UploadResult(fileUrl, 'voice');
+    } on DioException catch (e) {
+      throw ApiException(_dioMessage(e), statusCode: e.response?.statusCode);
+    }
+  }
 }

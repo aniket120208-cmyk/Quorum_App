@@ -22,6 +22,70 @@ Future<void> copyText(BuildContext context, String text) async {
   if (context.mounted) showToast(context, 'Copied');
 }
 
+class AiFileChip extends StatelessWidget {
+  const AiFileChip({
+    super.key,
+    required this.name,
+    required this.size,
+    this.onRemove,
+    this.onUserBubble = false,
+  });
+
+  final String name;
+  final int size;
+  final VoidCallback? onRemove;
+  final bool onUserBubble;
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = onUserBubble ? Colors.white.withValues(alpha: 0.16) : const Color(0xFF0F101A);
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 220),
+      padding: EdgeInsets.fromLTRB(10, 6, onRemove == null ? 10 : 4, 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: onUserBubble ? Colors.white24 : AppColors.surfaceBorder),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(aiFileIcon(name), size: 16, color: onUserBubble ? Colors.white70 : AppColors.primaryLight),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+                if (size > 0)
+                  Text(
+                    aiFileSize(size),
+                    style: TextStyle(color: onUserBubble ? Colors.white70 : AppColors.textSecondary, fontSize: 10),
+                  ),
+              ],
+            ),
+          ),
+          if (onRemove != null)
+            InkWell(
+              onTap: onRemove,
+              customBorder: const CircleBorder(),
+              child: const Padding(
+                padding: EdgeInsets.all(4),
+                child: Icon(Icons.close, size: 14, color: AppColors.textSecondary),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class AiRichText extends StatelessWidget {
   const AiRichText(this.text, {super.key});
   final String text;
@@ -171,11 +235,24 @@ class UserPromptBubble extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 4),
-            Text(
-              text,
-              style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
-            ),
+            if (turn.files.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final f in turn.files) AiFileChip(name: f.name, size: f.size, onUserBubble: true),
+                ],
+              ),
+            ],
+            if (text.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                text,
+                style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
+              ),
+            ],
             if (turn.caption != null && turn.prompt.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
@@ -307,6 +384,17 @@ class AiResponseCard extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
         ),
+      ));
+      children.add(const SizedBox(height: 10));
+    }
+
+    if (r.attachments.isNotEmpty) {
+      children.add(Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final a in r.attachments) AiFileChip(name: a.fileName, size: a.fileSize),
+        ],
       ));
       children.add(const SizedBox(height: 10));
     }

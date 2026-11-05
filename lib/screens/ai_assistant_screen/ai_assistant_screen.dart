@@ -1,5 +1,8 @@
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:quorum_app/api/ai_service.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/models/ai_model.dart';
@@ -40,6 +43,7 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
     for (final m in AiMode.values) m: ScrollController(),
   };
   final Set<AiMode> _pendingModes = {};
+  final List<AiPickedFile> _attachments = [];
   int _nextId = 0;
 
   List<AiTurn> get _turns => _turnsByMode[_mode]!;
@@ -83,7 +87,10 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
           .toList();
       final recent = prior.length > 4 ? prior.sublist(prior.length - 4) : prior;
       for (final t in recent) {
-        parts.add('User: ${t.prompt}\nAssistant: ${t.result!.answer}');
+        final asked = t.prompt.isEmpty && t.files.isNotEmpty
+            ? 'Attached files: ${t.files.map((f) => f.name).join(', ')}'
+            : t.prompt;
+        parts.add('User: $asked\nAssistant: ${t.result!.answer}');
       }
     }
 
@@ -97,7 +104,8 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
     if (_pending) return;
     final mode = _mode;
     final text = _inputCtrl.text.trim();
-    if (!mode.promptOptional && text.isEmpty) return;
+    final files = mode == AiMode.chat ? List<AiPickedFile>.of(_attachments) : const <AiPickedFile>[];
+    if (!mode.promptOptional && text.isEmpty && files.isEmpty) return;
 
     String scopeId = '';
     if (mode.needsScope) {
@@ -116,7 +124,7 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
     switch (mode) {
       case AiMode.chat:
         final ctx = _chatContext();
-        run = () => svc.chat(text, context: ctx);
+        run = () => svc.chat(text, context: ctx, files: files);
         break;
       case AiMode.search:
         run = () => svc.search(text);
@@ -145,9 +153,13 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
       mode: mode,
       prompt: text,
       caption: caption,
+      files: files,
       run: run,
     );
-    setState(() => _turnsByMode[mode]!.add(turn));
+    setState(() {
+      _turnsByMode[mode]!.add(turn);
+      if (mode == AiMode.chat) _attachments.clear();
+    });
     _inputs[mode]!.clear();
     _scrollToEnd();
     _execute(turn);
@@ -178,6 +190,90 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
     } finally {
       if (mounted) setState(() => _pendingModes.remove(mode));
     }
+  }
+
+  Future<void> _pickAttachment() async {
+    if (_pending) return;
+    if (_attachments.length >= aiMaxFiles) {
+      showErrorSnack(context, 'You can attach up to $aiMaxFiles files.');
+      return;
+    }
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: AppColors.textPrimary),
+              title: const Text('Photo from gallery', style: TextStyle(color: AppColors.textPrimary)),
+              onTap: () => Navigator.pop(ctx, 'gallery'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined, color: AppColors.textPrimary),
+              title: const Text('Take a photo', style: TextStyle(color: AppColors.textPrimary)),
+              onTap: () => Navigator.pop(ctx, 'camera'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.insert_drive_file_outlined, color: AppColors.textPrimary),
+              title: const Text('Document or file', style: TextStyle(color: AppColors.textPrimary)),
+              onTap: () => Navigator.pop(ctx, 'file'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return;
+    try {
+      String? path;
+      String? name;
+      if (choice == 'file') {
+        final f = await FilePicker.pickFile(type: FileType.any);
+        path = f?.path;
+        name = f?.name;
+      } else {
+        final x = await ImagePicker().pickImage(
+          source: choice == 'camera' ? ImageSource.camera : ImageSource.gallery,
+          imageQuality: 85,
+        );
+        path = x?.path;
+        name = x?.name;
+      }
+      if (path == null || name == null) return;
+      final size = await File(path).length();
+      if (size > aiMaxFileBytes) {
+        throw ApiException('Files can be 10 MB at most. Please choose a smaller file.');
+      }
+      if (!mounted) return;
+      if (_attachments.any((a) => a.path == path)) return;
+      setState(() => _attachments.add(AiPickedFile(path: path!, name: name!, size: size)));
+    } catch (e) {
+      if (mounted) showErrorSnack(context, errorText(e));
+    }
+  }
+
+  Widget _attachmentStrip() {
+    if (_mode != AiMode.chat || _attachments.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: SizedBox(
+        width: double.infinity,
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final f in _attachments)
+              AiFileChip(
+                name: f.name,
+                size: f.size,
+                onRemove: _pending ? null : () => setState(() => _attachments.remove(f)),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _scrollToEnd() {
@@ -557,51 +653,68 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
                   ),
                 ),
               )
-            : Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
+            : Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: darkBg,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: AppColors.surfaceBorder),
-                      ),
-                      child: TextField(
-                        controller: _inputCtrl,
-                        minLines: 1,
-                        maxLines: 5,
-                        maxLength: _mode == AiMode.search ? 1000 : 10000,
-                        buildCounter: _hideCounter,
-                        textCapitalization: TextCapitalization.sentences,
-                        style: const TextStyle(
-                          color: AppColors.textPrimary,
-                          fontSize: 14,
+                  _attachmentStrip(),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      if (_mode == AiMode.chat)
+                        IconButton(
+                          tooltip: 'Attach files',
+                          onPressed: (_pending || _attachments.length >= aiMaxFiles) ? null : _pickAttachment,
+                          icon: Icon(
+                            Icons.attach_file_rounded,
+                            color: (_pending || _attachments.length >= aiMaxFiles)
+                                ? AppColors.textMuted
+                                : AppColors.textSecondary,
+                          ),
                         ),
-                        decoration: InputDecoration(
-                          hintText: _mode.inputHint,
-                          hintStyle: const TextStyle(color: AppColors.textSecondary),
-                          border: InputBorder.none,
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    onPressed: _pending ? null : _submit,
-                    icon: _pending
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: AppColors.primary,
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          decoration: BoxDecoration(
+                            color: darkBg,
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(color: AppColors.surfaceBorder),
+                          ),
+                          child: TextField(
+                            controller: _inputCtrl,
+                            minLines: 1,
+                            maxLines: 5,
+                            maxLength: _mode == AiMode.search ? 1000 : 10000,
+                            buildCounter: _hideCounter,
+                            textCapitalization: TextCapitalization.sentences,
+                            style: const TextStyle(
+                              color: AppColors.textPrimary,
+                              fontSize: 14,
                             ),
-                          )
-                        : const Icon(Icons.send_rounded, color: AppColors.primary),
+                            decoration: InputDecoration(
+                              hintText: _mode.inputHint,
+                              hintStyle: const TextStyle(color: AppColors.textSecondary),
+                              border: InputBorder.none,
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        onPressed: _pending ? null : _submit,
+                        icon: _pending
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.primary,
+                                ),
+                              )
+                            : const Icon(Icons.send_rounded, color: AppColors.primary),
+                      ),
+                    ],
                   ),
                 ],
               ),
