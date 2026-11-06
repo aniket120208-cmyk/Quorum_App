@@ -54,6 +54,7 @@ class AuthService {
   Future<AuthResult> login({
     required String email,
     required String password,
+    String? captchaToken,
   }) async {
     try {
       final response = await apiClient.dio.post(
@@ -61,6 +62,7 @@ class AuthService {
         data: {
           'email': email,
           'password': password,
+          if (captchaToken != null) 'captchaToken': captchaToken,
         },
       );
       return await _completeAuth(response.data['data']);
@@ -73,6 +75,7 @@ class AuthService {
     required String name,
     required String email,
     required String password,
+    String? captchaToken,
   }) async {
     try {
       await apiClient.dio.post(
@@ -81,6 +84,7 @@ class AuthService {
           'name': name,
           'email': email,
           'password': password,
+          if (captchaToken != null) 'captchaToken': captchaToken,
         },
       );
     } on DioException catch (e) {

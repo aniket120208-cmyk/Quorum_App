@@ -1,4 +1,6 @@
+import 'package:cloudflare_turnstile/cloudflare_turnstile.dart';
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/turnstile_captcha.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/auth_service.dart';
 import 'package:quorum_app/screens/sign_in_screen/sign_in_screen.dart';
@@ -21,6 +23,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _isLoading = false;
+  final _turnstileController = TurnstileController();
+  String? _captchaToken;
 
   final RegExp _nameRegex = RegExp(r"^[a-zA-Z\s]{2,50}$");
   final RegExp _emailRegex = RegExp(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$");
@@ -56,6 +60,13 @@ class _SignUpScreenState extends State<SignUpScreen> {
       });
       return;
     }
+    final captchaToken = _captchaToken;
+    if (captchaToken == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please complete the security verification.')),
+      );
+      return;
+    }
     setState(() => _isLoading = true);
     final email = _emailController.text.trim();
     final password = _passwordController.text;
@@ -64,6 +75,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         name: _nameController.text.trim(),
         email: email,
         password: password,
+        captchaToken: captchaToken,
       );
       if (!mounted) return;
       Navigator.push(
@@ -79,8 +91,16 @@ class _SignUpScreenState extends State<SignUpScreen> {
           : e.message;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _resetCaptcha();
+      }
     }
+  }
+
+  void _resetCaptcha() {
+    setState(() => _captchaToken = null);
+    _turnstileController.refreshToken();
   }
 
   @override
@@ -269,12 +289,24 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                         ),
                                       ),
                                     ],
-                                    const SizedBox(height: 28),
+                                    const SizedBox(height: 24),
+                                    TurnstileCaptcha(
+                                      controller: _turnstileController,
+                                      onTokenChanged: (token) {
+                                        if (mounted) setState(() => _captchaToken = token);
+                                      },
+                                      onError: (msg) {
+                                        if (mounted) {
+                                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+                                        }
+                                      },
+                                    ),
+                                    const SizedBox(height: 24),
                                     SizedBox(
                                       width: double.infinity,
                                       height: 52,
                                       child: ElevatedButton(
-                                        onPressed: _isLoading ? null : _submitForm,
+                                        onPressed: (_isLoading || _captchaToken == null) ? null : _submitForm,
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: const Color(0xFF3B4AF5),
                                           disabledBackgroundColor: const Color(0xFF3B4AF5).withValues(alpha: 0.5),

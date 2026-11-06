@@ -92,7 +92,10 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
       final otp = _otpControllers.map((c) => c.text).join();
       var result = await AuthService.instance.verifyEmail(email: widget.email, otp: otp);
       if (!result.authenticated && widget.password != null) {
-        result = await AuthService.instance.login(email: widget.email, password: widget.password!);
+        try {
+          result = await AuthService.instance.login(email: widget.email, password: widget.password!);
+        } on ApiException {
+        }
       }
       if (!mounted) return;
       if (result.authenticated) {

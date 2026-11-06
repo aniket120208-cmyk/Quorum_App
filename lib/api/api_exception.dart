@@ -4,7 +4,8 @@ class ApiException implements Exception {
   ApiException(this.message, {this.statusCode});
 
   bool get isRateLimited => statusCode == 429;
-  bool get isEmailNotVerified => statusCode == 403 && message.toLowerCase().contains('verif');
+  bool get isCaptchaFailed => statusCode == 403 && message.toLowerCase().contains('captcha');
+  bool get isEmailNotVerified => statusCode == 403 && !isCaptchaFailed && message.toLowerCase().contains('verif');
 
   @override
   String toString() => message;
