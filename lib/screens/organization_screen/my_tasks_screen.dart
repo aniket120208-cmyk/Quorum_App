@@ -4,7 +4,7 @@ import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/models/organization_models.dart';
 import 'organization_widgets.dart';
-import 'task_widgets.dart';
+import 'task_kanban_board.dart';
 
 class MyTasksScreen extends StatefulWidget {
   const MyTasksScreen({super.key, required this.organization});
@@ -115,12 +115,20 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
           ? const Center(child: CircularProgressIndicator(color: orgTeal))
           : _error != null
               ? _errorView()
-              : RefreshIndicator(
-                  color: orgTeal,
-                  backgroundColor: orgCard,
-                  onRefresh: () => _load(silent: true),
-                  child: _tasks.isEmpty ? _empty() : _list(),
-                ),
+              : _tasks.isEmpty
+                  ? RefreshIndicator(
+                      color: orgTeal,
+                      backgroundColor: orgCard,
+                      onRefresh: () => _load(silent: true),
+                      child: _empty(),
+                    )
+                  : TaskKanbanBoard(
+                      tasks: _tasks,
+                      showTeam: true,
+                      canMove: (_) => true,
+                      onMove: _changeStatus,
+                      onRefresh: () => _load(silent: true),
+                    ),
     );
   }
 
@@ -152,51 +160,6 @@ class _MyTasksScreenState extends State<MyTasksScreen> {
         SizedBox(height: 120),
         Center(child: Text('No tasks assigned to you', style: TextStyle(color: orgMuted))),
       ],
-    );
-  }
-
-  Widget _list() {
-    final sorted = [..._tasks]..sort((a, b) {
-        final due = (a.dueDate ?? DateTime(9999)).compareTo(b.dueDate ?? DateTime(9999));
-        if (due != 0) return due;
-        return (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0));
-      });
-    final children = <Widget>[];
-    for (final status in TaskStatus.values) {
-      final group = sorted.where((t) => t.status == status).toList();
-      if (group.isEmpty) continue;
-      children.add(
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-          child: Row(
-            children: [
-              Icon(taskStatusIcon(status), color: taskStatusColor(status), size: 16),
-              const SizedBox(width: 8),
-              Text(
-                '${status.label} (${group.length})',
-                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700),
-              ),
-            ],
-          ),
-        ),
-      );
-      for (final task in group) {
-        children.add(
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: TaskCard(
-              task: task,
-              showTeam: true,
-              onStatusChange: (next) => _changeStatus(task, next),
-            ),
-          ),
-        );
-      }
-    }
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
-      children: children,
     );
   }
 }

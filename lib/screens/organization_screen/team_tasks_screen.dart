@@ -6,6 +6,7 @@ import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/models/organization_models.dart';
 import 'organization_sheets.dart';
 import 'organization_widgets.dart';
+import 'task_kanban_board.dart';
 import 'task_widgets.dart';
 
 class TeamTasksScreen extends StatefulWidget {
@@ -113,13 +114,9 @@ class _TeamTasksScreenState extends State<TeamTasksScreen> {
     }
   }
 
-  List<TeamTask> _byStatus(TaskStatus status) => _tasks.where((t) => t.status == status).toList();
-
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: TaskStatus.values.length,
-      child: Scaffold(
+    return Scaffold(
         backgroundColor: orgBg,
         appBar: AppBar(
           backgroundColor: orgBg,
@@ -130,17 +127,6 @@ class _TeamTasksScreenState extends State<TeamTasksScreen> {
             children: [
               const Text('Tasks', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
               Text(widget.team.name, style: const TextStyle(fontSize: 12, color: orgMuted)),
-            ],
-          ),
-          bottom: TabBar(
-            indicatorColor: orgTeal,
-            labelColor: Colors.white,
-            unselectedLabelColor: orgMuted,
-            dividerColor: orgBorder,
-            labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-            tabs: [
-              for (final status in TaskStatus.values)
-                Tab(text: '${status.label} (${_byStatus(status).length})'),
             ],
           ),
         ),
@@ -157,10 +143,13 @@ class _TeamTasksScreenState extends State<TeamTasksScreen> {
             ? const Center(child: CircularProgressIndicator(color: orgTeal))
             : _error != null
                 ? _errorView()
-                : TabBarView(
-                    children: [for (final status in TaskStatus.values) _column(status)],
+                : TaskKanbanBoard(
+                    tasks: _tasks,
+                    canMove: _canChange,
+                    onMove: _changeStatus,
+                    onRefresh: () => _load(silent: true),
+                    bottomPadding: _canCreate ? 72 : 0,
                   ),
-      ),
     );
   }
 
@@ -182,38 +171,6 @@ class _TeamTasksScreenState extends State<TeamTasksScreen> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _column(TaskStatus status) {
-    final tasks = _byStatus(status);
-    return RefreshIndicator(
-      color: orgTeal,
-      backgroundColor: orgCard,
-      onRefresh: () => _load(silent: true),
-      child: tasks.isEmpty
-          ? ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              children: [
-                const SizedBox(height: 80),
-                Center(
-                  child: Text('No ${status.label.toLowerCase()} tasks', style: const TextStyle(color: orgMuted)),
-                ),
-              ],
-            )
-          : ListView.separated(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
-              itemCount: tasks.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 10),
-              itemBuilder: (context, index) {
-                final task = tasks[index];
-                return TaskCard(
-                  task: task,
-                  onStatusChange: _canChange(task) ? (next) => _changeStatus(task, next) : null,
-                );
-              },
-            ),
     );
   }
 }
