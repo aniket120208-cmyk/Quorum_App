@@ -4,7 +4,9 @@ import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/auth_service.dart';
 import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/notification_service.dart';
+import 'package:quorum_app/api/calendar_repository.dart';
 import 'package:quorum_app/api/organization_repository.dart';
+import 'package:quorum_app/models/calendar_models.dart';
 import 'package:quorum_app/models/notification_models.dart';
 import 'package:quorum_app/models/organization_models.dart';
 import 'package:quorum_app/screens/notification_screen/notification_screen.dart';
@@ -14,6 +16,9 @@ import 'package:quorum_app/screens/organization_screen/organization_detail_scree
 import 'package:quorum_app/screens/organization_screen/organization_widgets.dart';
 import 'package:quorum_app/screens/profile_screen/profile_screen.dart';
 import 'bottom_nav_bar.dart';
+import 'calendar_screen.dart';
+import 'home_stories.dart';
+import 'package:quorum_app/screens/organization_screen/task_widgets.dart';
 import 'package:quorum_app/screens/chat_screen/chat_screen.dart';
 import 'package:quorum_app/screens/ai_assistant_screen/ai_assistant_screen.dart';
 import 'package:quorum_app/screens/community_screen/community_screen.dart';
@@ -91,6 +96,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _orgsLoading = true;
   String? _orgsError;
 
+  List<CalendarEvent> _events = [];
+  List<TeamTask> _myTasks = [];
+  bool _storiesLoaded = false;
+
   @override
   void initState() {
     super.initState();
@@ -99,6 +108,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         NotificationService.instance.incoming.listen(_onNotification);
     _loadUser();
     _loadOrgs();
+    _loadStories();
   }
 
   @override
@@ -112,6 +122,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _loadOrgs();
+      _loadStories();
     }
   }
 
@@ -223,7 +234,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       body: SafeArea(
         child: RefreshIndicator(
           color: _teal,
-          onRefresh: () => _loadOrgs(),
+          onRefresh: () => Future.wait([_loadOrgs(), _loadStories()]),
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -283,6 +294,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(height: 18),
+                if (_storiesLoaded) ...[
+                  _buildStories(),
+                  const SizedBox(height: 18),
+                ],
                 _buildHero(),
                 const SizedBox(height: 22),
                 _buildWorkspaceSection(),
@@ -294,6 +309,116 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ),
       ),
+    );
+  }
+
+  Future<void> _loadStories() async {
+    var events = _events;
+    try {
+      events = await CalendarRepository.instance.getUpcoming(limit: 6);
+    } catch (_) {}
+    final tasks = <TeamTask>[];
+    try {
+      final orgs = _orgs ?? await OrganizationRepository.instance.organizations();
+      final lists = await Future.wait(
+        orgs.take(6).map((o) => OrganizationRepository.instance.myTasks(o.id).catchError((_) => <TeamTask>[])),
+      );
+      for (final list in lists) {
+        tasks.addAll(list);
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _events = events;
+      _myTasks = tasks;
+      _storiesLoaded = true;
+    });
+  }
+
+  List<StorySlide> _storySlides() {
+    final now = DateTime.now();
+    final events = _events.where((e) => e.startDate.isAfter(now.subtract(const Duration(hours: 1)))).take(4).toList();
+    final open = _myTasks.where((t) => t.status != TaskStatus.completed).toList()
+      ..sort((a, b) => (a.dueDate ?? DateTime(9999)).compareTo(b.dueDate ?? DateTime(9999)));
+    final overdue = open.where((t) => t.isOverdue).length;
+    final unread = NotificationService.instance.unreadCount.value;
+    final orgs = _orgs ?? const <Organization>[];
+
+    return [
+      StorySlide(
+        id: 'schedule',
+        label: 'Schedule',
+        icon: Icons.event_rounded,
+        colors: const [Color(0xFF7C5CFC), Color(0xFF4C3AE3)],
+        headline: events.isEmpty ? 'Nothing coming up' : (events.length == 1 ? '1 thing coming up' : '${events.length} things coming up'),
+        subtitle: events.isEmpty ? 'Your calendar is clear for now.' : 'Your next events and meetings.',
+        lines: [
+          for (final e in events)
+            StoryLine(
+              icon: e.meetingLink != null ? Icons.videocam_rounded : Icons.event_note_rounded,
+              text: e.title,
+              trailing: storyTimeLabel(e.startDate, allDay: e.isAllDay),
+            ),
+        ],
+        actionLabel: 'Open calendar',
+        onAction: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CalendarScreen())),
+      ),
+      StorySlide(
+        id: 'tasks',
+        label: 'Tasks',
+        icon: Icons.task_alt_rounded,
+        colors: const [Color(0xFF22A58A), Color(0xFF14806B)],
+        headline: open.isEmpty ? 'All tasks done' : (open.length == 1 ? '1 open task' : '${open.length} open tasks'),
+        subtitle: open.isEmpty
+            ? 'Nothing is waiting on you.'
+            : (overdue > 0 ? '$overdue overdue, tackle those first.' : 'Nothing overdue, nice work.'),
+        lines: [
+          for (final t in open.take(4))
+            StoryLine(
+              icon: taskStatusIcon(t.status),
+              iconColor: t.isOverdue ? const Color(0xFFFFB4B4) : null,
+              text: t.title,
+              trailing: t.dueDate != null ? taskDueLabel(t.dueDate!) : t.status.label,
+            ),
+        ],
+      ),
+      StorySlide(
+        id: 'alerts',
+        label: 'Alerts',
+        icon: Icons.notifications_active_rounded,
+        colors: const [Color(0xFFF59E0B), Color(0xFFEA580C)],
+        headline: unread == 0 ? 'All caught up' : (unread == 1 ? '1 unread alert' : '$unread unread alerts'),
+        subtitle: unread == 0 ? 'No new notifications.' : 'Mentions, invites and updates waiting for you.',
+        actionLabel: unread == 0 ? null : 'Open notifications',
+        onAction: unread == 0 ? null : _showNotifications,
+      ),
+      StorySlide(
+        id: 'workspaces',
+        label: 'Teams',
+        icon: Icons.apartment_rounded,
+        colors: const [Color(0xFFEC4899), Color(0xFFBE185D)],
+        headline: orgs.isEmpty ? 'No workspaces yet' : (orgs.length == 1 ? '1 workspace' : '${orgs.length} workspaces'),
+        subtitle: orgs.isEmpty ? 'Create or join one to get started.' : 'Where your teams get things done.',
+        lines: [
+          for (final o in orgs.take(4))
+            StoryLine(
+              icon: Icons.groups_rounded,
+              text: o.name,
+              trailing: o.membersCount == 1 ? '1 member' : '${o.membersCount} members',
+            ),
+        ],
+      ),
+    ];
+  }
+
+  Widget _buildStories() {
+    final slides = _storySlides();
+    return StoriesRow(
+      slides: slides,
+      onOpen: (i) async {
+        await openStories(context, slides, i);
+        if (mounted) setState(() {});
+      },
     );
   }
 
