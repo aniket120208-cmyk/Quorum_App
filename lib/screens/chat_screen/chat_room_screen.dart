@@ -10,7 +10,9 @@ import 'package:quorum_app/api/socket_service.dart';
 import 'package:quorum_app/api/saved_items_store.dart';
 import 'package:quorum_app/api/upload_service.dart';
 import 'package:quorum_app/models/chat_models.dart';
+import 'package:quorum_app/models/poll_models.dart';
 import 'package:quorum_app/models/saved_item_models.dart';
+import 'package:quorum_app/widgets/poll_widgets.dart';
 import 'attachment_widgets.dart';
 import 'chat_widgets.dart';
 import 'forward_screen.dart';
@@ -63,6 +65,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   String? _error;
 
   final Set<String> _typingIds = {};
+  final Set<String> _votingPolls = {};
   Timer? _typingStop;
   Timer? _convRefresh;
   bool _iAmTyping = false;
@@ -99,6 +102,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _socket.on('message:updated', _onMessageEdited);
     _socket.on('message:deleted', _onMessageDeleted);
     _socket.on('message:reaction_updated', _onReactionUpdated);
+    _socket.on('poll:updated', _onPollUpdated);
     _socket.on('typing:start', _onTypingStart);
     _socket.on('typing:stop', _onTypingStop);
     _socket.on('conversation:removed', _onRemoved);
@@ -125,6 +129,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _socket.off('message:updated', _onMessageEdited);
     _socket.off('message:deleted', _onMessageDeleted);
     _socket.off('message:reaction_updated', _onReactionUpdated);
+    _socket.off('poll:updated', _onPollUpdated);
     _socket.off('typing:start', _onTypingStart);
     _socket.off('typing:stop', _onTypingStop);
     _socket.off('conversation:removed', _onRemoved);
@@ -139,7 +144,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   List<ChatMessage> _merge(List<ChatMessage> a, List<ChatMessage> b) {
     final map = <String, ChatMessage>{};
     for (final m in [...a, ...b]) {
-      map[m.id] = m;
+      final prev = map[m.id];
+      map[m.id] = (m.poll == null && prev?.poll != null) ? m.copyWith(poll: prev!.poll) : m;
     }
     final realClientIds = map.values
         .where((m) => !m.id.startsWith(_tmp) && m.clientMessageId != null)
@@ -494,11 +500,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               title: const Text('File', style: TextStyle(color: textPrimary)),
               onTap: () => Navigator.pop(ctx, 'file'),
             ),
+            ListTile(
+              leading: const Icon(Icons.poll_outlined, color: textPrimary),
+              title: const Text('Poll', style: TextStyle(color: textPrimary)),
+              onTap: () => Navigator.pop(ctx, 'poll'),
+            ),
           ],
         ),
       ),
     );
     if (choice == null) return;
+    if (choice == 'poll') {
+      await _createPoll();
+      return;
+    }
 
     try {
       String? path;
@@ -608,6 +623,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       if (m.replyToId != null) 'replyToId': m.replyToId,
       if (m.fileUrl != null) 'fileUrl': m.fileUrl,
       if (m.fileUrl != null) 'fileType': m.fileType ?? 'file',
+      if (m.poll != null)
+        'poll': {
+          'question': m.poll!.question,
+          'options': m.poll!.options.map((o) => o.text).toList(),
+          'allowMultipleAnswers': m.poll!.allowMultipleAnswers,
+        },
       if (m.isVoice) ...{
         'fileName': m.attachmentName,
         if (m.fileSize != null) 'fileSize': m.fileSize,
@@ -629,6 +650,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             real = real.copyWith(
               localPath: old.localPath,
               fileName: real.fileName ?? old.fileName,
+              fileType: real.fileType ?? old.fileType,
+              poll: real.poll ?? old.poll,
               replyTo: real.replyTo ?? old.replyTo,
               replyToId: real.replyToId ?? old.replyToId,
               audioWaveform: real.audioWaveform.isEmpty ? old.audioWaveform : real.audioWaveform,
@@ -665,6 +688,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       _messages = _merge(_messages, [msg]);
       _typingIds.remove(msg.senderId);
     });
+    if (msg.isPoll && msg.poll == null) _onReconnect(null);
     if (msg.senderId != _me) _markRead(msg.id);
   }
 
@@ -797,6 +821,73 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       _update(m.id, (x) => x.copyWith(reactions: before));
       showErrorSnack(context, errorText(e));
     }
+  }
+
+  Future<void> _createPoll() async {
+    final draft = await showCreatePollSheet(context);
+    if (draft == null || !mounted) return;
+    _stopTyping();
+    final id = _newTempId();
+    final reply = _replyTo;
+    final temp = ChatMessage(
+      id: id,
+      clientMessageId: id,
+      senderId: _me,
+      senderName: widget.currentUserName,
+      text: draft.question,
+      fileType: 'poll',
+      poll: Poll.fromDraft(id, draft),
+      createdAt: DateTime.now(),
+      status: MessageStatus.sending,
+      replyToId: reply?.id,
+      replyTo: _quoteOf(reply),
+    );
+    setState(() {
+      _messages.insert(0, temp);
+      _replyTo = null;
+    });
+    _scrollToNewest();
+    _dispatch(id);
+  }
+
+  Future<void> _votePoll(ChatMessage m, String optionId) async {
+    final poll = m.poll;
+    if (poll == null || poll.isClosed || m.isDeleted || m.id.startsWith(_tmp)) return;
+    if (!_votingPolls.add(m.id)) return;
+    final me = ChatUser(id: _me, name: widget.currentUserName);
+    _update(m.id, (x) => x.copyWith(poll: poll.toggledVote(me, optionId)));
+    try {
+      final updated = await _socketOrRest<Poll?>(
+        'poll:vote',
+        {'conversationId': _convId, 'messageId': m.id, 'optionIds': [optionId]},
+        (res) => Poll.tryParse(res['data']),
+        () => _repo.votePoll(_convId, poll.id, [optionId]),
+      );
+      if (mounted && updated != null) _update(m.id, (x) => x.copyWith(poll: updated));
+    } catch (e) {
+      if (!mounted) return;
+      _update(m.id, (x) => x.copyWith(poll: poll));
+      showErrorSnack(context, errorText(e));
+    } finally {
+      _votingPolls.remove(m.id);
+    }
+  }
+
+  void _onPollUpdated(dynamic data) {
+    final j = asMap(data);
+    if (j == null || !mounted) return;
+    final conv = (j['conversationId'] ?? '').toString();
+    if (conv.isNotEmpty && conv != _convId) return;
+    final incoming = Poll.tryParse(j['poll']);
+    if (incoming == null) return;
+    var id = (j['messageId'] ?? '').toString();
+    if (id.isEmpty) {
+      final hit = _messages.where((x) => x.poll?.id == incoming.id);
+      if (hit.isEmpty) return;
+      id = hit.first.id;
+    }
+    if (_votingPolls.contains(id)) return;
+    _update(id, (x) => x.copyWith(poll: incoming.resolvedFor(_me, x.poll)));
   }
 
   Future<void> _openForward(List<String> ids) async {
@@ -1021,6 +1112,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final editable = mine &&
         !deleted &&
         !m.isVoice &&
+        !m.isPoll &&
         m.text.isNotEmpty &&
         DateTime.now().difference(m.createdAt) < const Duration(hours: 24);
     final myGroups = m.reactions.where((g) => g.reactedBy(_me));
@@ -1236,6 +1328,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 onRemoveMine: (e) => _react(m, e),
               ),
               onOpenReply: m.replyTo == null ? null : () => _jumpToMessage(m.replyTo!.id),
+              onVote: _selecting || m.id.startsWith(_tmp) ? null : (optionId) => _votePoll(m, optionId),
               members: _conv.members,
               myId: _me,
             ),
@@ -1504,6 +1597,7 @@ class _MessageBubble extends StatelessWidget {
     this.onLongPress,
     this.onReply,
     this.onOpenReply,
+    this.onVote,
   });
 
   final ChatMessage message;
@@ -1525,6 +1619,7 @@ class _MessageBubble extends StatelessWidget {
   final VoidCallback? onLongPress;
   final VoidCallback? onReply;
   final VoidCallback? onOpenReply;
+  final ValueChanged<String>? onVote;
   final ValueChanged<String> onReact;
   final void Function(List<MessageReactionGroup> groups, String emoji) onReactors;
   final List<ChatUser> members;
@@ -1637,6 +1732,17 @@ class _MessageBubble extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        )
+      else if (message.isPoll && message.poll != null)
+        SizedBox(
+          width: maxBubble,
+          child: PollCard(
+            poll: message.poll!,
+            myId: myId,
+            mine: isMe,
+            pending: status != MessageStatus.sent,
+            onVote: onVote,
           ),
         )
       else ...[

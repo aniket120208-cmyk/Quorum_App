@@ -3,6 +3,7 @@ import 'package:quorum_app/api/api_client.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/models/chat_models.dart';
+import 'package:quorum_app/models/poll_models.dart';
 
 class ChatRepository {
   ChatRepository._(this.api);
@@ -144,8 +145,39 @@ class ChatRepository {
         return ChatMessage.fromJson(Map<String, dynamic>.from(r.data['data'] as Map));
       });
 
-  Future<void> deleteMessage(String convId, String messageId) => _guard(() async {
-        await api.dio.delete('/api/conversations/$convId/messages/$messageId');
+  Future<void> deleteMessage(String convId, String messageId, {bool forEveryone = true}) =>
+      _guard(() async {
+        await api.dio.delete(
+          '/api/conversations/$convId/messages/$messageId',
+          data: {'deleteForEveryone': forEveryone},
+        );
+      });
+
+  Future<List<MessageReactionGroup>> reactToMessage(String convId, String messageId, String emoji) =>
+      _guard(() async {
+        final r = await api.dio.post(
+          '/api/conversations/$convId/messages/$messageId/reactions',
+          data: {'emoji': emoji},
+        );
+        final d = r.data['data'];
+        return MessageReactionGroup.listFrom(d is Map ? d['reactions'] : null);
+      });
+
+  Future<Poll?> votePoll(String convId, String pollId, List<String> optionIds) =>
+      _guard(() async {
+        final r = await api.dio.post(
+          '/api/conversations/$convId/polls/$pollId/vote',
+          data: {'optionIds': optionIds},
+        );
+        return Poll.tryParse(r.data['data']);
+      });
+
+  Future<void> forwardMessages(List<String> messageIds, List<String> targetConversationIds) =>
+      _guard(() async {
+        await api.dio.post('/api/conversations/messages/forward', data: {
+          'messageIds': messageIds,
+          'targetConversationIds': targetConversationIds,
+        });
       });
 
   Future<List<ChatUser>> searchUsers(String q) => _guard(() async {
