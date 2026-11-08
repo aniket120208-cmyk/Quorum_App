@@ -5,6 +5,7 @@ import 'package:quorum_app/api/community_repository.dart';
 import 'package:quorum_app/models/community_models.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
 import 'package:quorum_app/screens/community_screen/communtiy_details_screen.dart';
+import 'package:quorum_app/widgets/swipe_card_deck.dart';
 import 'community_widgets.dart';
 import 'my_join_requests_screen.dart';
 
@@ -39,6 +40,10 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
   int _token = 0;
   Timer? _debounce;
   final Set<String> _busy = {};
+  final Set<String> _skipped = {};
+  final Map<String, String> _deckRequests = {};
+  final _deckKey = GlobalKey<SwipeCardDeckState<DiscoveredCommunity>>();
+  bool _swipeMode = true;
 
   @override
   void initState() {
@@ -132,6 +137,44 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
 
   void _replace(String id, DiscoveredCommunity Function(DiscoveredCommunity) update) {
     setState(() => _items = [for (final c in _items) c.id == id ? update(c) : c]);
+  }
+
+  List<DiscoveredCommunity> get _deckItems =>
+      _items.where((c) => c.status == MembershipStatus.notMember && !_skipped.contains(c.id)).toList();
+
+  Future<bool> _deckSwipe(DiscoveredCommunity c, SwipeDirection direction) async {
+    if (direction == SwipeDirection.left) return true;
+    final message = await showDialog<String>(
+      context: context,
+      builder: (_) => TextPromptDialog(
+        title: 'Request to join ${c.name}',
+        hint: 'Add a note for the admins (optional)',
+        actionLabel: 'Send',
+        maxLines: 4,
+        maxLength: 500,
+      ),
+    );
+    if (message == null || !mounted) return false;
+    try {
+      final request = await _repo.sendJoinRequest(c.id, message: message);
+      if (!mounted) return false;
+      _deckRequests[c.id] = request.id;
+      showCommunityToast(context, 'Join request sent to ${c.name}');
+      return true;
+    } catch (e) {
+      if (mounted) showErrorSnack(context, errorText(e));
+      return false;
+    }
+  }
+
+  void _deckSwiped(DiscoveredCommunity c, SwipeDirection direction) {
+    if (direction == SwipeDirection.left) {
+      setState(() => _skipped.add(c.id));
+    } else {
+      final requestId = _deckRequests.remove(c.id);
+      _replace(c.id, (x) => x.copyWith(status: MembershipStatus.pendingRequest, pendingRequestId: requestId));
+    }
+    if (_deckItems.length < 4) _loadMore();
   }
 
   Future<void> _requestJoin(DiscoveredCommunity c) async {
@@ -240,17 +283,17 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
     );
   }
 
-  Widget _avatar(DiscoveredCommunity c) {
+  Widget _avatar(DiscoveredCommunity c, [double size = 52]) {
     final icon = c.icon;
-    if (icon == null) return CommunityAvatar(name: c.name, size: 52);
+    if (icon == null) return CommunityAvatar(name: c.name, size: size);
     return ClipRRect(
-      borderRadius: BorderRadius.circular(52 * 0.3),
+      borderRadius: BorderRadius.circular(size * 0.3),
       child: Image.network(
         icon,
-        width: 52,
-        height: 52,
+        width: size,
+        height: size,
         fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => CommunityAvatar(name: c.name, size: 52),
+        errorBuilder: (_, _, _) => CommunityAvatar(name: c.name, size: size),
       ),
     );
   }
@@ -376,6 +419,184 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
     );
   }
 
+  Widget _deckFace(DiscoveredCommunity c) {
+    final description = c.description;
+    final hasDesc = description != null && description.isNotEmpty;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: cardBorder),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF2A2563), Color(0xFF161733)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 18, offset: const Offset(0, 8)),
+        ],
+      ),
+      child: ClipRect(
+        child: SingleChildScrollView(
+          physics: const NeverScrollableScrollPhysics(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const SizedBox(height: 18),
+              _avatar(c, 96),
+              const SizedBox(height: 18),
+              Text(
+                c.name,
+                maxLines: 2,
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 14,
+                runSpacing: 6,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.groups, size: 16, color: violetLight),
+                      const SizedBox(width: 5),
+                      Text(
+                        c.memberCount == 1 ? '1 member' : '${c.memberCount} members',
+                        style: const TextStyle(color: muted, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.tag, size: 16, color: muted),
+                      const SizedBox(width: 3),
+                      Text(
+                        c.channelCount == 1 ? '1 channel' : '${c.channelCount} channels',
+                        style: const TextStyle(color: muted, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              Text(
+                hasDesc ? description : 'No description yet',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Color(0xFFD0D2E4), fontSize: 15, height: 1.45),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _roundButton(IconData icon, Color color, VoidCallback onTap, double size) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: cardBg,
+          border: Border.all(color: color, width: 2),
+          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.25), blurRadius: 14)],
+        ),
+        child: Icon(icon, color: color, size: size * 0.46),
+      ),
+    );
+  }
+
+  Widget _deckView() {
+    final items = _deckItems;
+    if (items.isEmpty) {
+      if ((_hasMore && _cursor != null) || _loadingMore) {
+        if (!_loadingMore) WidgetsBinding.instance.addPostFrameCallback((_) => _loadMore());
+        return const Center(child: CircularProgressIndicator(color: violet));
+      }
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.done_all_rounded, size: 52, color: violetLight),
+              const SizedBox(height: 12),
+              const Text(
+                "You're all caught up",
+                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'No more communities to swipe right now.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: muted, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              if (_skipped.isNotEmpty)
+                FilledButton(
+                  onPressed: () => setState(_skipped.clear),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: violet,
+                    foregroundColor: Colors.white,
+                    shape: const StadiumBorder(),
+                  ),
+                  child: const Text('Show skipped again'),
+                ),
+              TextButton(
+                onPressed: () => setState(() => _swipeMode = false),
+                child: const Text('Browse as list', style: TextStyle(color: violetLight)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxHeight < 140) return const SizedBox.shrink();
+        return Column(
+          children: [
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                child: SwipeCardDeck<DiscoveredCommunity>(
+                  key: _deckKey,
+                  items: items,
+                  rightLabel: 'JOIN',
+                  leftLabel: 'SKIP',
+                  rightColor: green,
+                  leftColor: const Color(0xFFEF4444),
+                  itemBuilder: (_, c) => _deckFace(c),
+                  onSwipe: _deckSwipe,
+                  onSwiped: _deckSwiped,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _roundButton(Icons.close_rounded, const Color(0xFFEF4444), () => _deckKey.currentState?.swipe(SwipeDirection.left), 58),
+                  const SizedBox(width: 28),
+                  _roundButton(Icons.favorite_rounded, green, () => _deckKey.currentState?.swipe(SwipeDirection.right), 58),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _body() {
     if (_loading) {
       return const Center(child: CircularProgressIndicator(color: violet));
@@ -396,7 +617,9 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
             height: 320,
             child: CenteredMessage(
               icon: Icons.search_off,
-              text: _query.isEmpty ? 'No public communities to show yet.' : 'No communities match "$_query".',
+              text: _query.isEmpty
+                  ? 'No public communities to show yet.'
+                  : 'No communities match "$_query".',
             ),
           ),
         ],
@@ -428,13 +651,26 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       backgroundColor: darkBg,
       appBar: AppBar(
         backgroundColor: darkBg,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text('Discover communities', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),),
+        title: const Text(
+          'Discover communities',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+        ),
         actions: [
+          IconButton(
+            tooltip: _swipeMode ? 'List view' : 'Swipe view',
+            onPressed: () => setState(() => _swipeMode = !_swipeMode),
+            icon: Icon(
+              _swipeMode ? Icons.view_agenda_outlined : Icons.style_outlined,
+              color: violetLight,
+              size: 22,
+            ),
+          ),
           IconButton(
             tooltip: 'My requests',
             onPressed: _openMyRequests,
@@ -446,12 +682,14 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
         children: [
           _searchField(),
           Expanded(
-            child: RefreshIndicator(
-              color: violet,
-              backgroundColor: cardBg,
-              onRefresh: () => _load(silent: true),
-              child: _body(),
-            ),
+            child: _swipeMode && !_loading && _error == null && _items.isNotEmpty
+                ? _deckView()
+                : RefreshIndicator(
+                    color: violet,
+                    backgroundColor: cardBg,
+                    onRefresh: () => _load(silent: true),
+                    child: _body(),
+                  ),
           ),
         ],
       ),
