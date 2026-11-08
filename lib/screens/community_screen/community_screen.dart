@@ -7,6 +7,7 @@ import 'package:quorum_app/models/community_models.dart';
 import 'package:quorum_app/models/notification_models.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
 import 'package:quorum_app/screens/community_screen/communtiy_details_screen.dart';
+import 'package:quorum_app/widgets/wallet_card_stack.dart';
 import 'community_discover_screen.dart';
 import 'community_widgets.dart';
 
@@ -20,7 +21,7 @@ class CommunityScreen extends StatefulWidget {
 }
 
 class _CommunityScreenState extends State<CommunityScreen> {
-  static const Color darkBg = Color(0xFF0A0B14);
+  static const Color darkBg = Colors.transparent;
   static const Color cardBg = Color(0xFF16172B);
   static const Color cardBorder = Color(0xFF2A2C4A);
   static const Color violet = Color(0xFF7C5CFC);
@@ -34,6 +35,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
   String? _error;
   _Filter _filter = _Filter.all;
   StreamSubscription<NotificationItem>? _notificationSub;
+  bool _walletMode = false;
+  int _walletFront = 0;
 
   @override
   void initState() {
@@ -200,12 +203,15 @@ class _CommunityScreenState extends State<CommunityScreen> {
             child: const Icon(Icons.groups, color: Colors.white, size: 18),
           ),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+              mainAxisSize: MainAxisSize.min,
+              children: const [
                 Text(
                   'Community',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 16,
@@ -215,6 +221,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
                 SizedBox(height: 2),
                 Text(
                   'Explore & connect',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: Color(0xFF9A9CB8), fontSize: 12),
                 ),
               ],
@@ -241,72 +249,6 @@ class _CommunityScreenState extends State<CommunityScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               shape: const StadiumBorder(),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _heroCard() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: cardBorder),
-        gradient: const LinearGradient(
-          colors: [Color(0xFF2A2563), Color(0xFF161733)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Build your circle • Start a community',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    height: 1.3,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Host dedicated sessions, collaborate with peers.',
-                  style: TextStyle(color: Color(0xFF9A9CB8), fontSize: 12, height: 1.3),
-                ),
-                const SizedBox(height: 14),
-                FilledButton.icon(
-                  onPressed: _create,
-                  icon: const Icon(Icons.add, size: 14),
-                  label: const Text(
-                    'Create Community',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                  ),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: violet,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    shape: const StadiumBorder(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: violet.withValues(alpha: 0.25),
-            ),
-            child: const Icon(Icons.groups, color: violetLight, size: 26),
           ),
         ],
       ),
@@ -348,91 +290,10 @@ class _CommunityScreenState extends State<CommunityScreen> {
           chip('All', _Filter.all),
           chip('Owned', _Filter.owned),
           chip('Member', _Filter.member),
+          const Spacer(),
+          _viewToggle(),
         ],
       ),
-    );
-  }
-
-  Widget _circlesSection(List<Community> list) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
-          child: Row(
-            children: [
-              const Icon(Icons.hub_outlined, color: teal, size: 20),
-              const SizedBox(width: 8),
-              const Text(
-                'My Circles',
-                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(width: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: teal.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  '${list.length} Active',
-                  style: const TextStyle(color: teal, fontSize: 11, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(
-          height: 106,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: list.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 14),
-            itemBuilder: (_, i) {
-              final c = list[i];
-              return GestureDetector(
-                onTap: () => _open(c),
-                child: SizedBox(
-                  width: 70,
-                  child: Column(
-                    children: [
-                      Container(
-                        width: 66,
-                        height: 66,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(18),
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFF22A58A), tealDark],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                        ),
-                        child: Text(
-                          _initials(c.name),
-                          style: const TextStyle(
-                            color: teal,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        c.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
     );
   }
 
@@ -553,12 +414,6 @@ class _CommunityScreenState extends State<CommunityScreen> {
                               style: const TextStyle(color: Color(0xFF9A9CB8), fontSize: 12),
                             ),
                             const SizedBox(width: 12),
-                            const Icon(Icons.lock_outline, size: 14, color: Color(0xFF9A9CB8)),
-                            const SizedBox(width: 4),
-                            const Text(
-                              'Private',
-                              style: TextStyle(color: Color(0xFF9A9CB8), fontSize: 12),
-                            ),
                           ],
                         ),
                       ],
@@ -584,12 +439,167 @@ class _CommunityScreenState extends State<CommunityScreen> {
             style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700),
           ),
           SizedBox(height: 2),
+        ],
+      ),
+    );
+  }
+
+  Widget _viewToggle() {
+    Widget btn(IconData icon, bool active, String tip, VoidCallback onTap) {
+      return Tooltip(
+        message: tip,
+        child: GestureDetector(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: active ? violet : cardBg,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: active ? violetLight : cardBorder, width: 1.2),
+            ),
+            child: Icon(icon, size: 18, color: active ? Colors.white : const Color(0xFFB4B6D0)),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        btn(Icons.style_outlined, !_walletMode, 'List', () => setState(() => _walletMode = false)),
+        const SizedBox(width: 6),
+        btn(Icons.view_agenda_outlined, _walletMode, 'Cards', () => setState(() => _walletMode = true)),
+      ],
+    );
+  }
+
+  static const List<List<Color>> _walletPalettes = [
+    [Color(0xFF7C5CFC), Color(0xFF4C3AE3)],
+    [Color(0xFF22A58A), Color(0xFF14806B)],
+    [Color(0xFFF59E0B), Color(0xFFEA580C)],
+    [Color(0xFFEC4899), Color(0xFFBE185D)],
+    [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
+  ];
+
+  Widget _walletFace(Community c, int index) {
+    final colors = _walletPalettes[index % _walletPalettes.length];
+    final description = c.description;
+    final hasDesc = description != null && description.isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22),
+        gradient: LinearGradient(colors: colors, begin: Alignment.topLeft, end: Alignment.bottomRight),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 12, offset: const Offset(0, -2)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  c.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.22),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(
+                  _roleLabel(c),
+                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
           Text(
-            'Private hubs you own or belong to',
-            style: TextStyle(color: Color(0xFF9A9CB8), fontSize: 12),
+            hasDesc ? description : 'Private community',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13, height: 1.3),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const Icon(Icons.groups, size: 16, color: Colors.white),
+              const SizedBox(width: 6),
+              Text(
+                c.memberCount == 1 ? '1 member' : '${c.memberCount} members',
+                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+              ),
+              const Spacer(),
+              Container(
+                width: 34,
+                height: 34,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.22)),
+                child: Text(
+                  _initials(c.name),
+                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
           ),
         ],
       ),
+    );
+  }
+
+  Widget _walletView(List<Community> list) {
+    final position = (_walletFront % list.length) + 1;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const footerHeight = 76.0;
+        final stackMax = constraints.maxHeight - footerHeight;
+        return SingleChildScrollView(
+          physics: const NeverScrollableScrollPhysics(),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(height: 10),
+                    WalletCardStack(
+                      itemCount: list.length,
+                      cardHeight: 190,
+                      peek: 40,
+                      maxVisible: 25,
+                      maxHeight: stackMax,
+                      itemBuilder: (_, i) => _walletFace(list[i], i),
+                      onTap: (i) => _open(list[i]),
+                      onFrontChanged: (i) => setState(() => _walletFront = i),
+                    ),
+                    const SizedBox(height: 22),
+                    Text(
+                      '$position / ${list.length}',
+                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Swipe the community away  •  Tap to open',
+                      style: TextStyle(color: Color(0xFF9A9CB8), fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -643,25 +653,32 @@ class _CommunityScreenState extends State<CommunityScreen> {
       backgroundColor: darkBg,
       body: SafeArea(
         bottom: false,
-        child: RefreshIndicator(
-          color: violet,
-          backgroundColor: cardBg,
-          onRefresh: () => _load(silent: true),
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.only(bottom: 24),
-            children: [
-              _header(),
-              _heroCard(),
-              _filterChips(),
-              if (showContent) ...[
-                _circlesSection(list),
-                _communitiesHeader(),
-                for (final c in list) _communityCard(c),
-              ] else
-                _statusBlock(),
-            ],
-          ),
+        child: Column(
+          children: [
+            _header(),
+            _filterChips(),
+            const SizedBox(height: 8),
+            Expanded(
+              child: (showContent && !_walletMode)
+                  ? _walletView(list)
+                  : RefreshIndicator(
+                      color: violet,
+                      backgroundColor: cardBg,
+                      onRefresh: () => _load(silent: true),
+                      child: ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.only(bottom: 24),
+                        children: [
+                          if (showContent) ...[
+                            _communitiesHeader(),
+                            for (final c in list) _communityCard(c),
+                          ] else
+                            _statusBlock(),
+                        ],
+                      ),
+                    ),
+            ),
+          ],
         ),
       ),
     );
