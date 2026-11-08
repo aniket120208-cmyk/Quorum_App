@@ -14,6 +14,7 @@ import 'package:quorum_app/models/meeting_models.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
 import 'package:quorum_app/screens/whiteboard_screen/meeting_whiteboard_sheet.dart';
 import 'package:quorum_app/screens/whiteboard_screen/whiteboard_screen.dart';
+import 'package:quorum_app/widgets/poll_widgets.dart';
 import 'widgets/call_action_button.dart';
 import 'widgets/draggable_pip_view.dart';
 import 'widgets/floating_reactions.dart';
@@ -416,6 +417,17 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                   },
                 ),
               ListTile(
+                leading: const Icon(Icons.poll_rounded, color: Colors.white),
+                title: Text(
+                  _svc.openPollCount > 0 ? 'Polls (${_svc.openPollCount})' : 'Polls',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _showPolls();
+                },
+              ),
+              ListTile(
                 leading: const Icon(Icons.ios_share_rounded, color: Colors.white),
                 title: const Text('Share invite link', style: TextStyle(color: Colors.white)),
                 onTap: () {
@@ -493,6 +505,18 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (_) => _ChatBottomSheet(svc: _svc, onSnack: _snack),
+    );
+    _showControls();
+  }
+
+  Future<void> _showPolls() async {
+    _hideTimer?.cancel();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => _PollsBottomSheet(svc: _svc, onSnack: _snack),
     );
     _showControls();
   }
@@ -1401,6 +1425,99 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 bottom: 10,
                 child: Icon(Icons.mic_off_rounded, color: Colors.redAccent, size: 18),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PollsBottomSheet extends StatefulWidget {
+  const _PollsBottomSheet({required this.svc, required this.onSnack});
+  final MeetingService svc;
+  final void Function(String message, {SnackBarAction? action}) onSnack;
+
+  @override
+  State<_PollsBottomSheet> createState() => _PollsBottomSheetState();
+}
+
+class _PollsBottomSheetState extends State<_PollsBottomSheet> {
+  Future<void> _create() async {
+    final draft = await showCreatePollSheet(context, submitLabel: 'Launch poll');
+    if (draft == null || !mounted) return;
+    final err = await widget.svc.createPoll(draft);
+    if (!mounted) return;
+    if (err != null) widget.onSnack(err);
+  }
+
+  Future<void> _close(String pollId) async {
+    final err = await widget.svc.closePoll(pollId);
+    if (!mounted) return;
+    if (err != null) widget.onSnack(err);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sheetHeight = MediaQuery.sizeOf(context).height * 0.7;
+    return SafeArea(
+      child: SizedBox(
+        height: sheetHeight,
+        child: Column(
+          children: [
+            const SizedBox(height: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Polls',
+                      style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: _create,
+                    icon: const Icon(Icons.add_rounded, size: 20),
+                    label: const Text('New poll'),
+                    style: TextButton.styleFrom(foregroundColor: AppColors.primaryLight),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Expanded(
+              child: ListenableBuilder(
+                listenable: widget.svc,
+                builder: (ctx, _) {
+                  final polls = widget.svc.polls.reversed.toList();
+                  if (polls.isEmpty) {
+                    return const Center(
+                      child: Text('No polls yet. Start one for everyone.', style: TextStyle(color: Colors.white38)),
+                    );
+                  }
+                  return ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    itemCount: polls.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (ctx, i) {
+                      final poll = polls[i];
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white10,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: PollCard(
+                          poll: poll,
+                          myId: widget.svc.userId,
+                          onVote: (optionId) => widget.svc.votePoll(poll.id, optionId),
+                          onClose: widget.svc.isHost && !poll.isClosed ? () => _close(poll.id) : null,
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
           ],
         ),
       ),

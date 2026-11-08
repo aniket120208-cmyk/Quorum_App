@@ -205,7 +205,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF090A10),
+      backgroundColor: Colors.transparent,
       body: SafeArea(
         child: ListenableBuilder(
           listenable: _controller,
