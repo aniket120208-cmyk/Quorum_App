@@ -45,6 +45,12 @@ class AiService {
         statusCode: 502,
       );
     }
+    if (status == 413) {
+      return ApiException(
+        msg ?? 'One of the files is too large. Files can be 10 MB at most.',
+        statusCode: 413,
+      );
+    }
     if (status == 403) {
       return ApiException(
         msg ?? 'You do not have access to this workspace.',
@@ -76,17 +82,84 @@ class AiService {
 
   AiProject? _project(Map<String, dynamic> b) => b['project'] is Map ? AiProject.fromJson(Map<String, dynamic>.from(b['project'])) : null;
 
-  Future<AiResult> chat(String prompt, {String? context}) => _guard(() async {
+  static const Map<String, String> _mimeByExt = {
+    'pdf': 'application/pdf',
+    'txt': 'text/plain',
+    'md': 'text/markdown',
+    'csv': 'text/csv',
+    'json': 'application/json',
+    'html': 'text/html',
+    'doc': 'application/msword',
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xls': 'application/vnd.ms-excel',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'ppt': 'application/vnd.ms-powerpoint',
+    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'png': 'image/png',
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'gif': 'image/gif',
+    'webp': 'image/webp',
+    'heic': 'image/heic',
+    'bmp': 'image/bmp',
+  };
+
+  String _mimeFor(String name) {
+    final dot = name.lastIndexOf('.');
+    final ext = dot == -1 ? '' : name.substring(dot + 1).toLowerCase();
+    return _mimeByExt[ext] ?? 'application/octet-stream';
+  }
+
+  List<AiAttachment> _attachments(Map<String, dynamic> b) => (b['attachments'] is List ? b['attachments'] as List : const [])
+      .whereType<Map>()
+      .map((e) => AiAttachment.fromJson(Map<String, dynamic>.from(e)))
+      .toList();
+
+  Future<AiResult> chat(
+    String prompt, {
+    String? context,
+    List<AiPickedFile> files = const [],
+  }) =>
+      _guard(() async {
+        final hasContext = context != null && context.trim().isNotEmpty;
+        final Object data;
+        if (files.isEmpty) {
+          data = {
+            'prompt': prompt,
+            if (hasContext) 'context': context,
+          };
+        } else {
+          final form = FormData();
+          if (prompt.trim().isNotEmpty) form.fields.add(MapEntry('prompt', prompt.trim()));
+          if (hasContext) form.fields.add(MapEntry('context', context!));
+          for (final f in files.take(aiMaxFiles)) {
+            form.files.add(MapEntry(
+              'files',
+              await MultipartFile.fromFile(
+                f.path,
+                filename: f.name,
+                contentType: DioMediaType.parse(_mimeFor(f.name)),
+              ),
+            ));
+          }
+          data = form;
+        }
         final r = await _dio.post(
           '$_base/chat',
-          data: {
-            'prompt': prompt,
-            if (context != null && context.trim().isNotEmpty) 'context': context,
-          },
-          options: _slow,
+          data: data,
+          options: files.isEmpty
+              ? _slow
+              : Options(
+                  receiveTimeout: const Duration(seconds: 120),
+                  sendTimeout: const Duration(seconds: 90),
+                ),
         );
         final b = _body(r.data);
-        return AiResult(answer: (b['answer'] ?? '').toString(), meta: _meta(b));
+        return AiResult(
+          answer: (b['answer'] ?? '').toString(),
+          meta: _meta(b),
+          attachments: _attachments(b),
+        );
       });
 
   Future<AiResult> search(String query, {int limit = 15}) => _guard(() async {

@@ -36,7 +36,7 @@ extension AiModeInfo on AiMode {
   String get inputHint {
     switch (this) {
       case AiMode.chat:
-        return 'Ask anything about Quorum or your work...';
+        return 'Ask anything, or attach files to analyze...';
       case AiMode.search:
         return 'Search messages, posts, meetings...';
       case AiMode.project:
@@ -66,7 +66,7 @@ extension AiModeInfo on AiMode {
   String get emptyBody {
     switch (this) {
       case AiMode.chat:
-        return 'Get answers about how Quorum works, or paste a discussion for context.';
+        return 'Get answers about how Quorum works, paste a discussion for context, or attach up to 5 files to analyze.';
       case AiMode.search:
         return 'Find answers across messages, community posts, organizations and meetings.';
       case AiMode.project:
@@ -134,17 +134,73 @@ final RegExp aiUuidPattern = RegExp(
   r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
 );
 
+const int aiMaxFiles = 5;
+const int aiMaxFileBytes = 10 * 1024 * 1024;
+
+String aiFileSize(int bytes) {
+  if (bytes >= 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  if (bytes >= 1024) return '${(bytes / 1024).round()} KB';
+  return '$bytes B';
+}
+
+IconData aiFileIcon(String name) {
+  final dot = name.lastIndexOf('.');
+  final ext = dot == -1 ? '' : name.substring(dot + 1).toLowerCase();
+  switch (ext) {
+    case 'jpg':
+    case 'jpeg':
+    case 'png':
+    case 'gif':
+    case 'webp':
+    case 'heic':
+    case 'bmp':
+      return Icons.image_outlined;
+    case 'pdf':
+      return Icons.picture_as_pdf_outlined;
+    case 'csv':
+    case 'xls':
+    case 'xlsx':
+      return Icons.table_chart_outlined;
+    default:
+      return Icons.description_outlined;
+  }
+}
+
+class AiPickedFile {
+  final String path;
+  final String name;
+  final int size;
+
+  const AiPickedFile({required this.path, required this.name, required this.size});
+}
+
+class AiAttachment {
+  final String fileName;
+  final String fileType;
+  final int fileSize;
+
+  const AiAttachment({required this.fileName, required this.fileType, required this.fileSize});
+
+  factory AiAttachment.fromJson(Map<String, dynamic> j) => AiAttachment(
+        fileName: (j['fileName'] ?? '').toString(),
+        fileType: (j['fileType'] ?? '').toString(),
+        fileSize: int.tryParse((j['fileSize'] ?? 0).toString()) ?? 0,
+      );
+}
+
 class AiMeta {
   final String model;
   final int? totalTokens;
+  final int? attachmentsProcessed;
 
-  const AiMeta({required this.model, this.totalTokens});
+  const AiMeta({required this.model, this.totalTokens, this.attachmentsProcessed});
 
   factory AiMeta.fromJson(Map<String, dynamic> j) {
     final usage = j['tokenUsage'];
     return AiMeta(
       model: (j['model'] ?? '').toString(),
       totalTokens: usage is Map ? int.tryParse((usage['totalTokens'] ?? '').toString()) : null,
+      attachmentsProcessed: int.tryParse((j['attachmentsProcessed'] ?? '').toString()),
     );
   }
 }
@@ -219,6 +275,7 @@ class AiResult {
   final String? target;
   final String? note;
   final AiMeta? meta;
+  final List<AiAttachment> attachments;
 
   const AiResult({
     this.answer = '',
@@ -230,6 +287,7 @@ class AiResult {
     this.target,
     this.note,
     this.meta,
+    this.attachments = const [],
   });
 }
 
@@ -240,6 +298,7 @@ class AiTurn {
   final AiMode mode;
   final String prompt;
   final String? caption;
+  final List<AiPickedFile> files;
   final Future<AiResult> Function() run;
   final TurnState state;
   final AiResult? result;
@@ -250,6 +309,7 @@ class AiTurn {
     required this.mode,
     required this.prompt,
     this.caption,
+    this.files = const [],
     required this.run,
     this.state = TurnState.loading,
     this.result,
@@ -261,6 +321,7 @@ class AiTurn {
         mode: mode,
         prompt: prompt,
         caption: caption,
+        files: files,
         run: run,
         state: state ?? this.state,
         result: result ?? this.result,

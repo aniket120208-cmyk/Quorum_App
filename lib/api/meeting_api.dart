@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:quorum_app/api/api_client.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/models/meeting_models.dart';
+import 'package:quorum_app/models/poll_models.dart';
 
 class MeetingApi {
   MeetingApi._();
@@ -143,6 +144,16 @@ class MeetingApi {
     try {
       final response = await _dio.get('/api/meetings/$code');
       return MeetingInfo.fromJson(_unwrap(response));
+    } on DioException catch (e) {
+      throw _toApiException(e);
+    }
+  }
+
+  Future<List<Poll>> polls(String code) async {
+    try {
+      final response = await _dio.get('/api/meetings/$code/polls');
+      final body = response.data;
+      return Poll.listFrom(body is Map ? body['data'] : null);
     } on DioException catch (e) {
       throw _toApiException(e);
     }

@@ -12,9 +12,11 @@ import 'package:quorum_app/api/socket_service.dart';
 import 'package:quorum_app/api/upload_service.dart';
 import 'package:quorum_app/models/chat_models.dart' show TeamConversations;
 import 'package:quorum_app/models/organization_models.dart';
+import 'package:quorum_app/screens/github_screen/team_github_screen.dart';
 import 'package:quorum_app/screens/jira_screen/team_jira_board_screen.dart';
 import 'package:quorum_app/screens/meetings_screen/meetings_list_screen.dart';
 import 'package:quorum_app/screens/chat_screen/attachment_widgets.dart';
+import 'package:quorum_app/screens/chat_screen/chat_widgets.dart' show ChatAvatar;
 import 'organization_widgets.dart';
 
 class TeamChatScreen extends StatefulWidget {
@@ -617,6 +619,15 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
     );
   }
 
+  void _openGithub() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TeamGithubScreen(organization: widget.organization, team: widget.team),
+      ),
+    );
+  }
+
   void _openJira() {
     Navigator.push(
       context,
@@ -645,6 +656,11 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
             tooltip: 'Jira tickets',
             onPressed: _openJira,
             icon: const Icon(Icons.view_kanban_outlined),
+          ),
+          IconButton(
+            tooltip: 'GitHub',
+            onPressed: _openGithub,
+            icon: const Icon(Icons.code_rounded),
           ),
         ],
         title: Column(
@@ -744,51 +760,75 @@ class _TeamChatScreenState extends State<TeamChatScreen> {
       reverse: true,
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
       itemCount: reversed.length,
-      itemBuilder: (context, index) => _messageItem(reversed[index]),
+      itemBuilder: (context, index) {
+        final message = reversed[index];
+        final older = index + 1 < reversed.length ? reversed[index + 1] : null;
+        final startsRun = older == null || older.isSystem || older.senderId != message.senderId;
+        return _messageItem(message, startsRun: startsRun, isOldest: older == null);
+      },
     );
   }
 
-  Widget _messageItem(TeamMessage message) {
+  Widget _messageItem(TeamMessage message, {required bool startsRun, required bool isOldest}) {
     if (message.isSystem) return _systemBubble(message);
     final mine = message.senderId == _me;
-    return Align(
-      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: GestureDetector(
-        onLongPress: () => _showActions(message),
-        child: Container(
-          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
-          margin: const EdgeInsets.symmetric(vertical: 4),
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
-          decoration: BoxDecoration(
-            color: mine ? orgAccent : orgCard,
-            borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(16),
-              topRight: const Radius.circular(16),
-              bottomLeft: Radius.circular(mine ? 16 : 4),
-              bottomRight: Radius.circular(mine ? 4 : 16),
-            ),
-            border: Border.all(color: message.isPinned ? orgTeal.withAlpha(140) : orgBorder),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (!mine)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    message.sender?.name ?? '',
-                    style: const TextStyle(color: orgTeal, fontSize: 12, fontWeight: FontWeight.w700),
-                  ),
-                ),
-              if (message.hasAttachment) _attachment(message),
-              if (message.hasAttachment && message.content.isNotEmpty) const SizedBox(height: 6),
-              if (message.content.isNotEmpty) _text(message.content),
-              const SizedBox(height: 4),
-              _footer(message, mine),
-            ],
-          ),
+    final bubble = GestureDetector(
+      onLongPress: () => _showActions(message),
+      child: Container(
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+        decoration: BoxDecoration(
+          color: mine ? orgAccent : orgCard,
+          borderRadius: BorderRadius.circular(16),
+          border: message.isPinned
+              ? Border.all(color: orgTeal.withAlpha(140))
+              : (mine ? null : Border.all(color: orgBorder)),
         ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!mine && startsRun)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ChatAvatar(
+                      name: message.sender?.name ?? '',
+                      imageUrl: message.sender?.avatar,
+                      radius: 10,
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        message.sender?.name ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: orgTeal, fontSize: 12, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (message.hasAttachment) _attachment(message),
+            if (message.hasAttachment && message.content.isNotEmpty) const SizedBox(height: 6),
+            if (message.content.isNotEmpty) _text(message.content),
+            const SizedBox(height: 4),
+            _footer(message, mine),
+          ],
+        ),
+      ),
+    );
+
+    return Padding(
+      padding: EdgeInsets.only(top: isOldest ? 0 : (startsRun ? 14 : 5)),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: mine ? MainAxisAlignment.end : MainAxisAlignment.start,
+        children: [
+          Flexible(child: bubble),
+        ],
       ),
     );
   }

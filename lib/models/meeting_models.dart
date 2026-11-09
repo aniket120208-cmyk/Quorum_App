@@ -248,6 +248,29 @@ class MeetingChatMessage {
       );
 }
 
+const List<String> meetingReactionEmojis = ['👍', '👏', '❤️', '🎉', '😂', '🔥'];
+
+class MeetingReaction {
+  final String userId;
+  final String userName;
+  final String emoji;
+  final DateTime timestamp;
+
+  const MeetingReaction({
+    required this.userId,
+    required this.userName,
+    required this.emoji,
+    required this.timestamp,
+  });
+
+  factory MeetingReaction.fromJson(Map<String, dynamic> j) => MeetingReaction(
+        userId: (j['userId'] ?? '').toString(),
+        userName: (j['userName'] ?? 'Participant').toString(),
+        emoji: (j['emoji'] ?? '').toString(),
+        timestamp: DateTime.tryParse((j['timestamp'] ?? '').toString())?.toLocal() ?? DateTime.now(),
+      );
+}
+
 class WaitingGuest {
   final String userId;
   final String name;
@@ -263,6 +286,7 @@ class RemotePeer {
   bool hasVideo = false;
   bool fitContain = false;
   bool isScreenSharing = false;
+  bool isHandRaised = false;
   final RTCVideoRenderer renderer = RTCVideoRenderer();
   late final Future<void> _ready = renderer.initialize();
   bool _disposed = false;

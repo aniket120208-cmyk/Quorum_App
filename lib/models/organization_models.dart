@@ -221,7 +221,7 @@ class TeamMessageSender {
         id: (j['id'] ?? '').toString(),
         name: (j['name'] ?? '').toString(),
         email: _str(j['email']),
-        avatar: _str(j['avatar']),
+        avatar: _str(j['avatar'] ?? j['avatarUrl'] ?? j['profilePicture'] ?? j['profileImage'] ?? j['image']),
       );
 }
 

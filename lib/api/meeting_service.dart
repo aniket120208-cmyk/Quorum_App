@@ -3,9 +3,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:quorum_app/api/api_client.dart';
+import 'package:quorum_app/api/meeting_api.dart';
 import 'package:quorum_app/api/screen_share_foreground.dart';
 import 'package:quorum_app/api/socket_service.dart' show asMap;
+import 'package:quorum_app/models/chat_models.dart' show ChatUser;
 import 'package:quorum_app/models/meeting_models.dart';
+import 'package:quorum_app/models/poll_models.dart';
 
 enum MeetingPhase { idle, connecting, waitingRoom, inCall, failed, rejected, ended }
 
@@ -69,6 +72,8 @@ class MeetingService extends ChangeNotifier {
   final Map<String, _Subscription> _subs = {};
   final List<RTCIceCandidate> _pendingPublisherCandidates = [];
   final List<MeetingChatMessage> _chat = [];
+  final List<Poll> _polls = [];
+  final Set<String> _votingPolls = {};
   final List<WaitingGuest> _waiting = [];
 
   MeetingPhase _phase = MeetingPhase.idle;
@@ -106,6 +111,8 @@ class MeetingService extends ChangeNotifier {
   int get unreadChat => _unreadChat;
   List<RemotePeer> get participants => _peers.values.toList(growable: false);
   List<MeetingChatMessage> get chat => List.unmodifiable(_chat);
+  List<Poll> get polls => List.unmodifiable(_polls);
+  int get openPollCount => _polls.where((p) => !p.isClosed).length;
   List<WaitingGuest> get waitingList => List.unmodifiable(_waiting);
   bool get _connected => _socket?.connected ?? false;
 
@@ -521,6 +528,37 @@ class MeetingService extends ChangeNotifier {
       }
       _notify();
     });
+    s.on('meeting:poll-created', (d) {
+      final m = asMap(d);
+      final poll = Poll.tryParse(m);
+      if (poll == null) {
+        unawaited(loadPolls());
+        return;
+      }
+      final isNew = !_polls.any((p) => p.id == poll.id);
+      final creator = (m?['createdBy'] ?? m?['creatorId'] ?? m?['userId'] ?? '').toString();
+      _upsertPoll(poll, broadcast: true);
+      if (isNew && creator != userId) _notice('New poll: ${poll.question}');
+    });
+    s.on('meeting:poll-updated', (d) {
+      final poll = Poll.tryParse(asMap(d));
+      if (poll == null) return;
+      _upsertPoll(poll, broadcast: true);
+    });
+    s.on('meeting:poll-closed', (d) {
+      final m = asMap(d);
+      final parsed = Poll.tryParse(m);
+      final id = parsed?.id ?? (m?['pollId'] ?? m?['id'] ?? '').toString();
+      if (id.isEmpty) return;
+      if (parsed != null) {
+        _upsertPoll(parsed.copyWith(isClosed: true), broadcast: true);
+        return;
+      }
+      final i = _polls.indexWhere((p) => p.id == id);
+      if (i == -1) return;
+      _polls[i] = _polls[i].copyWith(isClosed: true);
+      _notify();
+    });
     s.on('meeting:ended', (d) {
       final text = asMap(d)?['message']?.toString() ?? 'The meeting has been ended by the host';
       _finish(MeetingPhase.ended, text);
@@ -666,6 +704,7 @@ class MeetingService extends ChangeNotifier {
     }
     _inCall = true;
     _setPhase(MeetingPhase.inCall);
+    unawaited(loadPolls());
     if (_isMuted && _hasLocalAudio) _emitMic(true);
     if (_isVideoOff && _hasLocalVideo) _emitCam(true);
     unawaited(_startPublishing());
@@ -1058,6 +1097,142 @@ class MeetingService extends ChangeNotifier {
       } else {
         completer.complete((res?['message'] ?? 'Message could not be sent').toString());
       }
+    });
+    return completer.future;
+  }
+
+  void _upsertPoll(Poll incoming, {bool broadcast = false}) {
+    final i = _polls.indexWhere((p) => p.id == incoming.id);
+    final previous = i == -1 ? null : _polls[i];
+    final next = broadcast ? incoming.resolvedFor(userId, previous) : incoming;
+    if (i == -1) {
+      _polls.add(next);
+    } else {
+      _polls[i] = next;
+    }
+    _notify();
+  }
+
+  Future<void> loadPolls() async {
+    final socket = _socket;
+    List<Poll>? fetched;
+    if (socket != null && socket.connected) {
+      final completer = Completer<List<Poll>?>();
+      final timer = Timer(const Duration(seconds: 8), () {
+        if (!completer.isCompleted) completer.complete(null);
+      });
+      socket.emitWithAck('meeting:get-polls', {'meetingCode': meetingCode}, ack: (raw) {
+        timer.cancel();
+        if (completer.isCompleted) return;
+        final res = asMap(raw);
+        completer.complete(res != null && res['success'] == true ? Poll.listFrom(res['data']) : null);
+      });
+      fetched = await completer.future;
+    }
+    if (fetched == null) {
+      try {
+        fetched = await MeetingApi.instance.polls(meetingCode);
+      } catch (_) {}
+    }
+    if (fetched == null || _disposed || _tornDown) return;
+    _polls
+      ..clear()
+      ..addAll(fetched);
+    _notify();
+  }
+
+  Future<String?> createPoll(PollDraft draft) {
+    final socket = _socket;
+    if (!_inCall || socket == null || !socket.connected) {
+      return Future.value('Not connected to the meeting');
+    }
+    final completer = Completer<String?>();
+    final timer = Timer(const Duration(seconds: 10), () {
+      if (!completer.isCompleted) completer.complete('Poll timed out');
+    });
+    socket.emitWithAck('meeting:create-poll', {'meetingCode': meetingCode, ...draft.toJson()}, ack: (raw) {
+      timer.cancel();
+      if (completer.isCompleted) return;
+      final res = asMap(raw);
+      if (res == null || res['success'] != true) {
+        completer.complete((res?['message'] ?? 'Poll could not be created').toString());
+        return;
+      }
+      final created = Poll.tryParse(res['data']);
+      if (created != null) {
+        _upsertPoll(created);
+      } else {
+        unawaited(loadPolls());
+      }
+      completer.complete(null);
+    });
+    return completer.future;
+  }
+
+  void votePoll(String pollId, String optionId) {
+    final socket = _socket;
+    final i = _polls.indexWhere((p) => p.id == pollId);
+    if (i == -1) return;
+    final before = _polls[i];
+    if (before.isClosed) {
+      _notice('This poll is closed');
+      return;
+    }
+    if (!_inCall || socket == null || !socket.connected) {
+      _notice('Not connected to the meeting');
+      return;
+    }
+    if (!_votingPolls.add(pollId)) return;
+    final release = Timer(const Duration(seconds: 10), () => _votingPolls.remove(pollId));
+    _polls[i] = before.toggledVote(ChatUser(id: userId, name: userName), optionId);
+    _notify();
+    socket.emitWithAck(
+      'meeting:vote-poll',
+      {'meetingCode': meetingCode, 'pollId': pollId, 'optionIds': [optionId]},
+      ack: (raw) {
+        release.cancel();
+        _votingPolls.remove(pollId);
+        final res = asMap(raw);
+        final idx = _polls.indexWhere((p) => p.id == pollId);
+        if (idx == -1) return;
+        if (res == null || res['success'] != true) {
+          _polls[idx] = before;
+          _notify();
+          _notice((res?['message'] ?? 'Vote could not be recorded').toString());
+          return;
+        }
+        final updated = Poll.tryParse(res['data']);
+        if (updated != null) {
+          _polls[idx] = updated;
+          _notify();
+        }
+      },
+    );
+  }
+
+  Future<String?> closePoll(String pollId) {
+    final socket = _socket;
+    if (!_inCall || socket == null || !socket.connected) {
+      return Future.value('Not connected to the meeting');
+    }
+    final completer = Completer<String?>();
+    final timer = Timer(const Duration(seconds: 10), () {
+      if (!completer.isCompleted) completer.complete('Request timed out');
+    });
+    socket.emitWithAck('meeting:close-poll', {'meetingCode': meetingCode, 'pollId': pollId}, ack: (raw) {
+      timer.cancel();
+      if (completer.isCompleted) return;
+      final res = asMap(raw);
+      if (res == null || res['success'] != true) {
+        completer.complete((res?['message'] ?? 'Poll could not be closed').toString());
+        return;
+      }
+      final i = _polls.indexWhere((p) => p.id == pollId);
+      if (i != -1) {
+        _polls[i] = _polls[i].copyWith(isClosed: true);
+        _notify();
+      }
+      completer.complete(null);
     });
     return completer.future;
   }

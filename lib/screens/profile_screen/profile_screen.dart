@@ -14,6 +14,7 @@ import 'package:quorum_app/models/calendar_models.dart';
 import 'package:quorum_app/models/organization_models.dart';
 import 'package:quorum_app/screens/home_screen/calendar_helpers.dart';
 import 'package:quorum_app/screens/home_screen/calendar_screen.dart';
+import 'package:quorum_app/screens/github_screen/github_settings_screen.dart';
 import 'package:quorum_app/screens/jira_screen/jira_settings_screen.dart';
 import 'package:quorum_app/screens/notification_screen/notification_preferences_screen.dart';
 import 'package:quorum_app/screens/notification_screen/notification_screen.dart';
@@ -382,6 +383,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               icon: Icons.view_kanban_outlined,
               label: 'Jira integration',
               onTap: () => _push(const JiraSettingsScreen()),
+            ),
+            _menuTile(
+              icon: Icons.code_rounded,
+              label: 'GitHub integration',
+              onTap: () => _push(const GithubSettingsScreen()),
             ),
             const SizedBox(height: 22),
             _logoutButton(),
