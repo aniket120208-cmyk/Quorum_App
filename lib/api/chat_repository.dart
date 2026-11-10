@@ -136,6 +136,30 @@ class ChatRepository {
         );
       });
 
+  Future<({List<ChatMessage> items, String? cursor, bool hasMore})> searchMessages(
+    String convId,
+    String query, {
+    String? cursor,
+    int limit = 20,
+  }) =>
+      _guard(() async {
+        final r = await api.dio.get(
+          '/api/conversations/$convId/search',
+          queryParameters: {'q': query, 'limit': limit, if (cursor != null) 'cursor': cursor},
+        );
+        final d = r.data['data'];
+        final items = _asList(d, 'messages')
+            .map((e) => ChatMessage.fromJson(Map<String, dynamic>.from(e as Map)))
+            .where((m) => !m.isDeleted)
+            .toList()
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        return (
+          items: items,
+          cursor: d is Map ? d['nextCursor']?.toString() : null,
+          hasMore: d is Map && d['hasNextPage'] == true,
+        );
+      });
+
   Future<ChatMessage> editMessage(String convId, String messageId, String content) =>
       _guard(() async {
         final r = await api.dio.patch(

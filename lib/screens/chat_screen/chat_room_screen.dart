@@ -14,6 +14,7 @@ import 'package:quorum_app/models/poll_models.dart';
 import 'package:quorum_app/models/saved_item_models.dart';
 import 'package:quorum_app/widgets/poll_widgets.dart';
 import 'attachment_widgets.dart';
+import 'chat_search_widgets.dart';
 import 'chat_widgets.dart';
 import 'forward_screen.dart';
 import 'group_info_screen.dart';
@@ -33,12 +34,14 @@ class ChatRoomScreen extends StatefulWidget {
     required this.currentUserId,
     this.currentUserName = 'You',
     this.initialMessageId,
+    this.initialSearchQuery,
   });
 
   final Conversation conversation;
   final String currentUserId;
   final String currentUserName;
   final String? initialMessageId;
+  final String? initialSearchQuery;
 
   @override
   State<ChatRoomScreen> createState() => _ChatRoomScreenState();
@@ -55,6 +58,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   String? _highlightId;
   Timer? _highlightTimer;
   bool _jumpStarted = false;
+  late final MessageSearchController _search = MessageSearchController(
+    conversationId: widget.conversation.id,
+    localMessages: () => _messages,
+  );
+  final TextEditingController _searchCtrl = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
+  bool _searching = false;
 
   late Conversation _conv;
   List<ChatMessage> _messages = [];
@@ -110,6 +120,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _socket.on('connect', _onReconnect);
     _scrollCtrl.addListener(_onScroll);
     _inputCtrl.addListener(_onTextChanged);
+    final initialQuery = widget.initialSearchQuery?.trim() ?? '';
+    if (initialQuery.isNotEmpty) {
+      _searching = true;
+      _searchCtrl.text = initialQuery;
+      _search.setQuery(initialQuery, immediate: true);
+    }
     _loadInitial();
     SavedItemsStore.instance.ensureLoaded().then((_) {
       if (mounted) setState(() {});
@@ -118,6 +134,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   @override
   void dispose() {
+    _search.dispose();
+    _searchCtrl.dispose();
+    _searchFocus.dispose();
     _stopTyping();
     _typingStop?.cancel();
     _convRefresh?.cancel();
@@ -1363,12 +1382,79 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
+  void _openSearch() => setState(() => _searching = true);
+
+  void _closeSearch() {
+    _searchFocus.unfocus();
+    _searchCtrl.clear();
+    _search.setQuery('');
+    setState(() => _searching = false);
+  }
+
+  void _openSearchResult(ChatMessage message) {
+    _searchFocus.unfocus();
+    setState(() => _searching = false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _jumpToMessage(message.id);
+    });
+  }
+
+  PreferredSizeWidget _searchBar() {
+    return AppBar(
+      backgroundColor: darkBg,
+      elevation: 0,
+      iconTheme: const IconThemeData(color: textPrimary),
+      titleSpacing: 0,
+      leading: IconButton(
+        tooltip: 'Close search',
+        icon: const Icon(Icons.arrow_back_rounded),
+        onPressed: _closeSearch,
+      ),
+      title: TextField(
+        controller: _searchCtrl,
+        focusNode: _searchFocus,
+        autofocus: true,
+        textInputAction: TextInputAction.search,
+        cursorColor: primary,
+        style: const TextStyle(color: textPrimary, fontSize: 16),
+        decoration: const InputDecoration(
+          border: InputBorder.none,
+          hintText: 'Search messages',
+          hintStyle: TextStyle(color: textSecondary),
+        ),
+        onChanged: (value) {
+          _search.setQuery(value);
+          setState(() {});
+        },
+        onSubmitted: (value) => _search.setQuery(value, immediate: true),
+      ),
+      actions: [
+        if (_searchCtrl.text.isNotEmpty)
+          IconButton(
+            tooltip: 'Clear',
+            icon: const Icon(Icons.close_rounded),
+            onPressed: () {
+              _searchCtrl.clear();
+              _search.setQuery('');
+              setState(() {});
+              _searchFocus.requestFocus();
+            },
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: !_selecting,
+      canPop: !_selecting && !_searching,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _selecting) setState(_selectedIds.clear);
+        if (didPop) return;
+        if (_selecting) {
+          setState(_selectedIds.clear);
+        } else if (_searching) {
+          _closeSearch();
+        }
       },
       child: _buildScaffold(context),
     );
@@ -1404,7 +1490,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     children: [
                       IconButton(
                         tooltip: 'Attach',
-                        icon: const Icon(Icons.attach_file, color: textSecondary),
+                        icon: const Icon(Icons.add, color: textSecondary),
                         onPressed: _showAttachMenu,
                       ),
                       Expanded(
@@ -1458,7 +1544,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
     return Scaffold(
       backgroundColor: darkBg,
-      appBar: _selecting ? _selectionBar() : AppBar(
+      appBar: _selecting ? _selectionBar() : _searching ? _searchBar() : AppBar(
         backgroundColor: darkBg,
         elevation: 0,
         iconTheme: const IconThemeData(color: textPrimary),
@@ -1501,6 +1587,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         ),
         actions: [
           IconButton(
+            tooltip: 'Search',
+            icon: const Icon(Icons.search_rounded),
+            onPressed: _openSearch,
+          ),
+          IconButton(
             tooltip: SavedItemsStore.instance.isSaved(SavedItemType.chat, _convId) ? 'Remove from saved' : 'Save chat',
             icon: Icon(
               SavedItemsStore.instance.isSaved(SavedItemType.chat, _convId)
@@ -1517,7 +1608,32 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             ),
         ],
       ),
-      body: Column(
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Offstage(
+              offstage: _searching,
+              child: _buildChatColumn(),
+            ),
+          ),
+          if (_searching)
+            Positioned.fill(
+              child: ColoredBox(
+                color: darkBg,
+                child: MessageSearchResults(
+                  controller: _search,
+                  currentUserId: _me,
+                  onTap: _openSearchResult,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChatColumn() {
+    return Column(
         children: [
           Expanded(child: _buildBody()),
           if (_suggestions.isNotEmpty)
@@ -1543,7 +1659,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           ),
           _buildComposer(),
         ],
-      ),
     );
   }
 }

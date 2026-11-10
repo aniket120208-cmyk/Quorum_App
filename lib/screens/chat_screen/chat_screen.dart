@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:quorum_app/models/chat_models.dart';
 import 'chat_room_screen.dart';
+import 'chat_search_widgets.dart';
 import 'chat_widgets.dart';
 import 'dart:async';
 import 'package:quorum_app/api/api_exception.dart';
@@ -198,7 +199,7 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() => _conversations.removeWhere((c) => c.id == id));
   }
 
-  Future<void> _openChatRoom(Conversation conversation) async {
+  Future<void> _openChatRoom(Conversation conversation, {String? messageId, String? searchQuery}) async {
     _openConversationId = conversation.id;
     final i = _conversations.indexWhere((c) => c.id == conversation.id);
     if (i != -1 && _conversations[i].unreadCount > 0) {
@@ -210,6 +211,8 @@ class _ChatScreenState extends State<ChatScreen> {
           conversation: conversation,
           currentUserId: _currentUserId,
           currentUserName: _currentUserName,
+          initialMessageId: messageId,
+          initialSearchQuery: searchQuery,
         ),
       ),
     );
@@ -324,6 +327,8 @@ class _ChatScreenState extends State<ChatScreen> {
       },
       onRefresh: () => _loadConversations(silent: true),
       onConversationTap: _openChatRoom,
+      onMessageTap: (c, m) => _openChatRoom(c, messageId: m.id),
+      onOpenInChat: (c, q) => _openChatRoom(c, searchQuery: q),
       onNewChatTap: _newChat,
       onNewGroupTap: _newGroup,
     );
@@ -342,11 +347,15 @@ class ChatListView extends StatefulWidget {
     this.errorMessage,
     this.onRetry,
     this.onRefresh,
+    this.onMessageTap,
+    this.onOpenInChat,
   });
 
   final List<Conversation> conversations;
   final String currentUserId;
   final ValueChanged<Conversation> onConversationTap;
+  final void Function(Conversation conversation, ChatMessage message)? onMessageTap;
+  final void Function(Conversation conversation, String query)? onOpenInChat;
   final VoidCallback onNewChatTap;
   final VoidCallback onNewGroupTap;
   final bool isLoading;
@@ -360,37 +369,142 @@ class ChatListView extends StatefulWidget {
 
 class _ChatListViewState extends State<ChatListView> {
   ChatFilter _filter = ChatFilter.all;
+  bool _searching = false;
+  final TextEditingController _search = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  void _openSearch() => setState(() => _searching = true);
+
+  void _closeSearch() {
+    _searchFocus.unfocus();
+    _search.clear();
+    setState(() => _searching = false);
+  }
+
+  PreferredSizeWidget _searchBar() {
+    return AppBar(
+      backgroundColor: const Color(0xFF0F101A),
+      elevation: 0,
+      titleSpacing: 0,
+      leading: IconButton(
+        tooltip: 'Close search',
+        icon: const Icon(Icons.arrow_back_rounded, color: AppColors.textPrimary),
+        onPressed: _closeSearch,
+      ),
+      title: TextField(
+        controller: _search,
+        focusNode: _searchFocus,
+        autofocus: true,
+        textInputAction: TextInputAction.search,
+        cursorColor: AppColors.primaryLight,
+        style: const TextStyle(color: AppColors.textPrimary, fontSize: 16),
+        decoration: const InputDecoration(
+          border: InputBorder.none,
+          hintText: 'Search chats and messages',
+          hintStyle: TextStyle(color: AppColors.textMuted),
+        ),
+        onChanged: (_) => setState(() {}),
+      ),
+      actions: [
+        if (_search.text.isNotEmpty)
+          IconButton(
+            tooltip: 'Clear',
+            icon: const Icon(Icons.close_rounded, color: AppColors.textPrimary),
+            onPressed: () {
+              _search.clear();
+              setState(() {});
+            },
+          ),
+      ],
+    );
+  }
+
+  Widget _searchBody() {
+    return ChatSearchView(
+      query: _search.text,
+      conversations: widget.conversations,
+      currentUserId: widget.currentUserId,
+      onConversationTap: (c) {
+        _searchFocus.unfocus();
+        widget.onConversationTap(c);
+      },
+      onMessageTap: (c, m) {
+        _searchFocus.unfocus();
+        final open = widget.onMessageTap;
+        if (open != null) {
+          open(c, m);
+        } else {
+          widget.onConversationTap(c);
+        }
+      },
+      onOpenInChat: (c, q) {
+        _searchFocus.unfocus();
+        final open = widget.onOpenInChat;
+        if (open != null) {
+          open(c, q);
+        } else {
+          widget.onConversationTap(c);
+        }
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !_searching,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _searching) _closeSearch();
+      },
+      child: _scaffold(),
+    );
+  }
+
+  Widget _scaffold() {
     return Scaffold(
       backgroundColor: const Color(0xFF0F101A),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0F101A),
-        elevation: 0,
-        title: const Text(
-          'Chat',
-          style: TextStyle(
-            color: AppColors.textPrimary,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'New group',
-            icon: const Icon(Icons.group_add_outlined, color: AppColors.textPrimary),
-            onPressed: widget.onNewGroupTap,
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: AppColors.primary,
-        foregroundColor: AppColors.textPrimary,
-        tooltip: 'New chat',
-        onPressed: widget.onNewChatTap,
-        child: const Icon(Icons.edit_outlined),
-      ),
-      body: Builder(
+      appBar: _searching
+          ? _searchBar()
+          : AppBar(
+              backgroundColor: const Color(0xFF0F101A),
+              elevation: 0,
+              title: const Text(
+                'Chat',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              actions: [
+                IconButton(
+                  tooltip: 'Search',
+                  icon: const Icon(Icons.search_rounded, color: AppColors.textPrimary),
+                  onPressed: _openSearch,
+                ),
+                IconButton(
+                  tooltip: 'New group',
+                  icon: const Icon(Icons.group_add_outlined, color: AppColors.textPrimary),
+                  onPressed: widget.onNewGroupTap,
+                ),
+              ],
+            ),
+      floatingActionButton: _searching
+          ? null
+          : FloatingActionButton(
+              backgroundColor: AppColors.primary,
+              foregroundColor: AppColors.textPrimary,
+              tooltip: 'New chat',
+              onPressed: widget.onNewChatTap,
+              child: const Icon(Icons.edit_outlined),
+            ),
+      body: _searching ? _searchBody() : Builder(
         builder: (context) {
           if (widget.isLoading) {
             return const Center(
