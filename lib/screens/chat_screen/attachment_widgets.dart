@@ -1,8 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:quorum_app/api/api_exception.dart';
+import 'package:quorum_app/api/download_service.dart';
 import 'package:quorum_app/models/chat_models.dart';
 import 'chat_widgets.dart';
+import 'file_preview_screen.dart';
+export 'file_preview_screen.dart' show openFilePreview;
 
 class AttachmentView extends StatelessWidget {
   const AttachmentView({super.key, required this.message});
@@ -62,7 +65,10 @@ class AttachmentView extends StatelessWidget {
           ? null
           : () => Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => ImageViewerScreen(url: message.fileUrl!),
+                  builder: (_) => ImageViewerScreen(
+                    url: message.fileUrl!,
+                    fileName: message.attachmentName,
+                  ),
                 ),
               ),
       child: ClipRRect(
@@ -145,24 +151,100 @@ class AttachmentView extends StatelessWidget {
               ),
             ),
           ),
+          if (!_uploading && message.fileUrl != null)
+            DownloadButton(url: message.fileUrl!, fileName: message.attachmentName),
         ],
       ),
     );
   }
 
-  Future<void> _open(BuildContext context) async {
-    final uri = Uri.tryParse(message.fileUrl!);
-    if (uri == null) return;
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok && context.mounted) {
-      showErrorSnack(context, 'Could not open this file');
+  void _open(BuildContext context) =>
+      openFilePreview(context, message.fileUrl!, message.attachmentName);
+}
+
+Future<void> downloadAttachment(BuildContext context, String url, String? fileName) async {
+  final messenger = ScaffoldMessenger.of(context);
+  messenger
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      const SnackBar(
+        content: Text('Downloading...', style: TextStyle(color: Colors.white)),
+        backgroundColor: Color(0xFF334155),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 30),
+      ),
+    );
+  try {
+    final saved = await DownloadService.instance.save(url: url, fileName: fileName);
+    if (saved == null || saved.isEmpty) {
+      messenger.hideCurrentSnackBar();
+      return;
     }
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Saved to your device', style: TextStyle(color: Colors.white)),
+          backgroundColor: Color(0xFF334155),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+  } catch (e) {
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(e is ApiException ? e.message : 'Could not save this file', style: const TextStyle(color: Colors.white)),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+  }
+}
+
+class DownloadButton extends StatefulWidget {
+  const DownloadButton({super.key, required this.url, this.fileName, this.color = AppColors.textPrimary});
+
+  final String url;
+  final String? fileName;
+  final Color color;
+
+  @override
+  State<DownloadButton> createState() => _DownloadButtonState();
+}
+
+class _DownloadButtonState extends State<DownloadButton> {
+  bool _busy = false;
+
+  Future<void> _download() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    await downloadAttachment(context, widget.url, widget.fileName);
+    if (mounted) setState(() => _busy = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: 'Download',
+      visualDensity: VisualDensity.compact,
+      onPressed: _busy ? null : _download,
+      icon: _busy
+          ? SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2, color: widget.color),
+            )
+          : Icon(Icons.download_rounded, size: 20, color: widget.color),
+    );
   }
 }
 
 class ImageViewerScreen extends StatelessWidget {
-  const ImageViewerScreen({super.key, required this.url});
+  const ImageViewerScreen({super.key, required this.url, this.fileName});
   final String url;
+  final String? fileName;
 
   @override
   Widget build(BuildContext context) {
@@ -171,6 +253,10 @@ class ImageViewerScreen extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.black,
         iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          DownloadButton(url: url, fileName: fileName, color: Colors.white),
+          const SizedBox(width: 4),
+        ],
       ),
       body: Center(
         child: InteractiveViewer(
