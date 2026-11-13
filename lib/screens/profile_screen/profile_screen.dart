@@ -12,6 +12,7 @@ import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/api/user_service.dart';
 import 'package:quorum_app/models/calendar_models.dart';
 import 'package:quorum_app/models/organization_models.dart';
+import 'package:quorum_app/screens/project_screen/projects_list_screen.dart';
 import 'package:quorum_app/screens/home_screen/calendar_helpers.dart';
 import 'package:quorum_app/screens/home_screen/calendar_screen.dart';
 import 'package:quorum_app/screens/github_screen/github_settings_screen.dart';
@@ -23,6 +24,8 @@ import 'package:quorum_app/screens/organization_screen/join_organization_screen.
 import 'package:quorum_app/screens/organization_screen/organization_detail_screen.dart';
 import 'package:quorum_app/screens/organization_screen/organization_widgets.dart';
 import 'package:quorum_app/screens/saved_items_screen/saved_items_screen.dart';
+import 'package:quorum_app/screens/document_screen/document_list_screen.dart';
+import 'package:quorum_app/models/document_models.dart';
 import 'package:quorum_app/screens/sign_in_screen/sign_in_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -356,6 +359,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 22),
             _sectionTitle('Account'),
             _menuTile(
+              icon: Icons.description_outlined,
+              label: 'My documents',
+              onTap: () => _push(const DocumentListScreen(title: 'My documents', scope: DocumentScope.personal)),
+            ),
+            _menuTile(
               icon: Icons.bookmark_border_rounded,
               label: 'Saved items',
               onTap: () => _push(const SavedItemsScreen()),
@@ -653,6 +661,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
         const SizedBox(height: 4),
+        OutlinedButton.icon(
+          onPressed: () => _push(const ProjectsListScreen()),
+          icon: const Icon(Icons.handshake_outlined, size: 18, color: orgTeal),
+          label: const Text('My projects', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(44),
+            side: const BorderSide(color: orgBorder),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+        ),
+        const SizedBox(height: 10),
         Row(
           children: [
             Expanded(
