@@ -169,6 +169,8 @@ class ChatMessage {
   final DateTime createdAt;
   final MessageStatus status;
   final bool isRead;
+  final bool isDelivered;
+  final int? seq;
   final List<String> mentionedUserIds;
   final List<ChatUser> mentionedUsers;
   final bool isEdited;
@@ -199,6 +201,8 @@ class ChatMessage {
     required this.createdAt,
     this.status = MessageStatus.sent,
     this.isRead = false,
+    this.isDelivered = false,
+    this.seq,
     this.mentionedUserIds = const [],
     this.mentionedUsers = const [],
     this.isEdited = false,
@@ -265,6 +269,8 @@ class ChatMessage {
     DateTime? createdAt,
     MessageStatus? status,
     bool? isRead,
+    bool? isDelivered,
+    int? seq,
     List<String>? mentionedUserIds,
     List<ChatUser>? mentionedUsers,
     bool? isEdited,
@@ -295,6 +301,8 @@ class ChatMessage {
       createdAt: createdAt ?? this.createdAt,
       status: status ?? this.status,
       isRead: isRead ?? this.isRead,
+      isDelivered: isDelivered ?? this.isDelivered,
+      seq: seq ?? this.seq,
       mentionedUserIds: mentionedUserIds ?? this.mentionedUserIds,
       mentionedUsers: mentionedUsers ?? this.mentionedUsers,
       isEdited: isEdited ?? this.isEdited,
@@ -321,6 +329,8 @@ class ChatMessage {
         senderAvatar: senderAvatar,
         createdAt: createdAt,
         isRead: isRead,
+        isDelivered: isDelivered,
+        seq: seq,
         replyToId: replyToId,
         replyTo: replyTo,
         isForwarded: isForwarded,
@@ -338,6 +348,12 @@ class ChatMessage {
     final ids = j['mentionedUserIds'] is List
         ? (j['mentionedUserIds'] as List).map((e) => e.toString()).toList()
         : users.map((u) => u.id).toList();
+    final statusName = (j['status'] ?? '').toString().toLowerCase();
+    final read = j['isRead'] == true || j['readAt'] != null || statusName == 'read' || statusName == 'seen';
+    final delivered = read ||
+        j['isDelivered'] == true ||
+        j['deliveredAt'] != null ||
+        statusName == 'delivered';
     return ChatMessage(
       id: j['id'].toString(),
       clientMessageId: j['clientMessageId']?.toString(),
@@ -349,6 +365,9 @@ class ChatMessage {
       fileType: j['fileType']?.toString() ?? (j['poll'] is Map || j['type']?.toString() == 'poll' ? 'poll' : null),
       fileName: j['fileName']?.toString(),
       createdAt: DateTime.parse(j['createdAt'].toString()).toLocal(),
+      isRead: read,
+      isDelivered: delivered,
+      seq: int.tryParse((j['seq'] ?? '').toString()),
       mentionedUserIds: ids,
       mentionedUsers: users,
       isEdited: j['isEdited'] == true || j['editedAt'] != null,
@@ -392,6 +411,11 @@ class Conversation {
   final DateTime updatedAt;
   final ChatMessage? lastMessage;
   final List<ChatUser> members;
+  final bool isMuted;
+  final DateTime? mutedUntil;
+  final bool isBlocked;
+
+  bool get muted => isMuted && (mutedUntil == null || mutedUntil!.isAfter(DateTime.now()));
 
   const Conversation({
     required this.id,
@@ -407,12 +431,21 @@ class Conversation {
     required this.updatedAt,
     this.lastMessage,
     this.members = const [],
+    this.isMuted = false,
+    this.mutedUntil,
+    this.isBlocked = false,
   });
 
   Conversation copyWith({
     int? unreadCount,
     DateTime? updatedAt,
     ChatMessage? lastMessage,
+    bool clearLastMessage = false,
+    String? avatar,
+    bool clearAvatar = false,
+    bool? isMuted,
+    DateTime? mutedUntil,
+    bool? isBlocked,
   }) =>
       Conversation(
         id: id,
@@ -421,14 +454,25 @@ class Conversation {
         directEmail: directEmail,
         groupTitle: groupTitle,
         isGroup: isGroup,
-        avatar: avatar,
+        avatar: clearAvatar ? null : (avatar ?? this.avatar),
         directAvatar: directAvatar,
         adminId: adminId,
         unreadCount: unreadCount ?? this.unreadCount,
         updatedAt: updatedAt ?? this.updatedAt,
-        lastMessage: lastMessage ?? this.lastMessage,
+        lastMessage: clearLastMessage ? null : (lastMessage ?? this.lastMessage),
         members: members,
+        isMuted: isMuted ?? this.isMuted,
+        mutedUntil: isMuted != null ? (isMuted ? mutedUntil : null) : (mutedUntil ?? this.mutedUntil),
+        isBlocked: isBlocked ?? this.isBlocked,
       );
+
+  String? directUserIdFor(String currentUserId) {
+    if (isGroup || isTeam) return null;
+    for (final m in members) {
+      if (m.id != currentUserId) return m.id;
+    }
+    return null;
+  }
 
   String titleFor(String currentUserId) {
     if (isGroup) {
@@ -491,6 +535,22 @@ class Conversation {
         ? ChatMessage.fromJson(Map<String, dynamic>.from(j['lastMessage']))
         : null;
 
+    var isMuted = j['isMuted'] == true;
+    var isBlocked = j['isBlocked'] == true;
+    DateTime? mutedUntil = DateTime.tryParse((j['mutedUntil'] ?? '').toString())?.toLocal();
+    for (final e in rawMembers) {
+      if (e is! Map) continue;
+      final m = Map<String, dynamic>.from(e);
+      final u = m['user'] is Map ? Map<String, dynamic>.from(m['user']) : m;
+      final uid = (u['id'] ?? m['userId'] ?? '').toString();
+      if (m['isBlocked'] == true) isBlocked = true;
+      if (uid == myId) {
+        if (m['isMuted'] == true) isMuted = true;
+        mutedUntil ??= DateTime.tryParse((m['mutedUntil'] ?? '').toString())?.toLocal();
+      }
+    }
+    if (mutedUntil != null) isMuted = true;
+
     return Conversation(
       id: j['id'].toString(),
       isTeam: isTeam,
@@ -508,6 +568,9 @@ class Conversation {
           DateTime.now(),
       lastMessage: last,
       members: members,
+      isMuted: isMuted,
+      mutedUntil: mutedUntil,
+      isBlocked: isBlocked,
     );
   }
 }
