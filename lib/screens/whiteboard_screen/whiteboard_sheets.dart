@@ -3,8 +3,8 @@ import 'package:quorum_app/screens/organization_screen/organization_widgets.dart
 import 'whiteboard_controller.dart';
 
 const List<Color> whiteboardPalette = [
-  Color(0xFF0F172A),
   Color(0xFFF8FAFC),
+  Color(0xFF94A3B8),
   Color(0xFFEF4444),
   Color(0xFFF59E0B),
   Color(0xFF22C55E),
@@ -19,11 +19,17 @@ class WhiteboardNameSheet extends StatefulWidget {
     required this.title,
     required this.action,
     this.initialName = '',
+    this.hint = 'Whiteboard name',
+    this.maxLines = 1,
+    this.maxLength = 80,
   });
 
   final String title;
   final String action;
   final String initialName;
+  final String hint;
+  final int maxLines;
+  final int maxLength;
 
   @override
   State<WhiteboardNameSheet> createState() => _WhiteboardNameSheetState();
@@ -64,15 +70,17 @@ class _WhiteboardNameSheetState extends State<WhiteboardNameSheet> {
           TextField(
             controller: _name,
             autofocus: true,
-            maxLength: 80,
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => _submit(),
+            maxLength: widget.maxLength,
+            minLines: 1,
+            maxLines: widget.maxLines,
+            textInputAction: widget.maxLines == 1 ? TextInputAction.done : TextInputAction.newline,
+            onSubmitted: widget.maxLines == 1 ? (_) => _submit() : null,
             onChanged: (_) {
               if (_error != null) setState(() => _error = null);
             },
             style: const TextStyle(color: Colors.white),
             decoration: InputDecoration(
-              hintText: 'Whiteboard name',
+              hintText: widget.hint,
               hintStyle: const TextStyle(color: orgMuted),
               errorText: _error,
               counterText: '',

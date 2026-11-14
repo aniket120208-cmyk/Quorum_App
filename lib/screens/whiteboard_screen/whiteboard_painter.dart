@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:quorum_app/models/whiteboard_models.dart';
 import 'whiteboard_controller.dart';
@@ -10,10 +11,8 @@ class WhiteboardPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final view = controller.viewState;
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..color = parseHexColor(view.backgroundColor) ?? Colors.white,
-    );
+    canvas.drawRect(Offset.zero & size, Paint()..color = whiteboardCanvasColor);
+    _grid(canvas, size, view);
     canvas.save();
     canvas.scale(view.zoom);
     canvas.translate(view.scrollX, view.scrollY);
@@ -21,9 +20,23 @@ class WhiteboardPainter extends CustomPainter {
     for (final el in controller.elements) {
       switch (el.type) {
         case 'stroke':
-          _stroke(canvas, el.points, el.strokeColor, el.strokeWidth);
+          final highlight = el.json['highlight'] == true;
+          _stroke(
+            canvas,
+            el.points,
+            highlight ? el.strokeColor.withOpacity(0.4) : _visible(el.strokeColor),
+            el.strokeWidth,
+          );
         case 'text':
           layoutText(el).paint(canvas, Offset(el.x, el.y));
+        case 'sticky':
+          _sticky(canvas, el);
+        case 'comment':
+          _comment(canvas, el);
+        case 'image':
+          _image(canvas, el);
+        case 'frame':
+          _frame(canvas, el);
         case 'rectangle':
         case 'ellipse':
         case 'diamond':
@@ -37,7 +50,12 @@ class WhiteboardPainter extends CustomPainter {
     if (liveShape != null) _shape(canvas, liveShape);
 
     if (controller.livePoints.isNotEmpty) {
-      _stroke(canvas, controller.livePoints, controller.color, controller.strokeWidth);
+      _stroke(
+        canvas,
+        controller.livePoints,
+        controller.liveHighlight ? controller.color.withOpacity(0.4) : controller.color,
+        controller.liveStrokeWidth,
+      );
     }
 
     final selected = controller.selected;
@@ -63,9 +81,114 @@ class WhiteboardPainter extends CustomPainter {
     }
   }
 
+  Color _visible(Color c) => c.computeLuminance() < 0.05 ? const Color(0xFFF8FAFC) : c;
+
+  void _grid(Canvas canvas, Size size, WhiteboardViewState view) {
+    final gap = 26 * view.zoom;
+    if (gap < 9) return;
+    final startX = (view.scrollX * view.zoom) % gap;
+    final startY = (view.scrollY * view.zoom) % gap;
+    final points = <Offset>[];
+    for (var x = startX; x < size.width; x += gap) {
+      for (var y = startY; y < size.height; y += gap) {
+        points.add(Offset(x, y));
+      }
+    }
+    canvas.drawPoints(
+      ui.PointMode.points,
+      points,
+      Paint()
+        ..color = const Color(0x33FFFFFF)
+        ..strokeWidth = math.max(1.4, 1.6 * view.zoom)
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  void _sticky(Canvas canvas, WhiteboardElement el) {
+    final rect = Rect.fromLTWH(el.x, el.y, el.width, el.height);
+    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(8));
+    canvas.drawRRect(
+      rrect.shift(const Offset(0, 4)),
+      Paint()
+        ..color = const Color(0x55000000)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+    );
+    canvas.drawRRect(rrect, Paint()..color = el.fillColor ?? const Color(0xFFFFE08A));
+    final tp = layoutBoxText(
+      el,
+      maxWidth: math.max(el.width - 28, 10),
+      fontSize: 17,
+      color: const Color(0xFF1F2937),
+      maxLines: ((el.height - 28) / (17 * 1.25)).floor().clamp(1, 20).toInt(),
+    );
+    tp.paint(canvas, Offset(rect.left + 14, rect.top + 14));
+  }
+
+  void _comment(Canvas canvas, WhiteboardElement el) {
+    final rect = Rect.fromLTWH(el.x, el.y, el.width, el.height);
+    final fill = Paint()..color = el.fillColor ?? const Color(0xFF7C6CFF);
+    canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(14)), fill);
+    final tail = Path()
+      ..moveTo(rect.left + 14, rect.bottom - 1)
+      ..lineTo(rect.left + 10, rect.bottom + 12)
+      ..lineTo(rect.left + 30, rect.bottom - 1)
+      ..close();
+    canvas.drawPath(tail, fill);
+    final tp = layoutBoxText(
+      el,
+      maxWidth: math.max(el.width - 28, 10),
+      fontSize: 16,
+      color: Colors.white,
+    );
+    tp.paint(canvas, Offset(rect.left + 14, rect.top + 11));
+  }
+
+  void _image(Canvas canvas, WhiteboardElement el) {
+    final rect = Rect.fromLTWH(el.x, el.y, el.width, el.height);
+    final image = controller.imageFor((el.json['url'] ?? '').toString());
+    if (image == null) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(8)),
+        Paint()..color = const Color(0x14FFFFFF),
+      );
+      return;
+    }
+    canvas.save();
+    canvas.clipRRect(RRect.fromRectAndRadius(rect, const Radius.circular(8)));
+    canvas.drawImageRect(
+      image,
+      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      rect,
+      Paint()..filterQuality = FilterQuality.medium,
+    );
+    canvas.restore();
+  }
+
+  void _frame(Canvas canvas, WhiteboardElement el) {
+    final rect = Rect.fromLTWH(el.x, el.y, el.width, el.height);
+    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(12));
+    canvas.drawRRect(rrect, Paint()..color = const Color(0x0DFFFFFF));
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = const Color(0x66A9A4D6)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6,
+    );
+    if (el.text.isEmpty) return;
+    final tp = layoutBoxText(
+      el,
+      maxWidth: math.max(el.width - 24, 10),
+      fontSize: 14,
+      color: const Color(0xFFC4BEFF),
+      maxLines: 1,
+    );
+    tp.paint(canvas, Offset(rect.left + 12, rect.top + 8));
+  }
+
   void _shape(Canvas canvas, WhiteboardElement el) {
     final line = Paint()
-      ..color = el.strokeColor
+      ..color = _visible(el.strokeColor)
       ..strokeWidth = el.strokeWidth
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
@@ -116,7 +239,7 @@ class WhiteboardPainter extends CustomPainter {
     }
     final fill = el.fillColor;
     if (fill != null) {
-      canvas.drawPath(path, Paint()..color = fill.withOpacity(0.28));
+      canvas.drawPath(path, Paint()..color = _visible(fill).withOpacity(0.28));
     }
     canvas.drawPath(path, line);
   }

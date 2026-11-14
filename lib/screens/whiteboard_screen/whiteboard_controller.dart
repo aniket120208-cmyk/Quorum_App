@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/socket_service.dart';
 import 'package:quorum_app/models/whiteboard_models.dart';
 
 enum WhiteboardStatus { joining, ready, error }
-enum WhiteboardTool { pan, select, pen, eraser, text, shape, emoji }
+enum WhiteboardTool { pan, select, pen, highlighter, eraser, text, shape, emoji, sticky, comment }
+enum WhiteboardTemplate { frame, kanban, matrix, table }
 enum ShapeKind { rectangle, ellipse, diamond, triangle, line, arrow }
 
 class WhiteboardTextResult {
@@ -36,6 +38,8 @@ class _UndoAction {
   final List<WhiteboardElement> after;
 }
 
+const Color whiteboardCanvasColor = Color(0xFF0F0E17);
+
 class WhiteboardController extends ChangeNotifier {
   WhiteboardController({required this.boardId, this.meetingCode});
 
@@ -49,6 +53,8 @@ class WhiteboardController extends ChangeNotifier {
   final List<_PendingOp> _pending = [];
   final List<_UndoAction> _undoStack = [];
   final List<_UndoAction> _redoStack = [];
+  final Map<String, ui.Image> _images = {};
+  final Set<String> _loadingImages = {};
   final StreamController<String> _notices = StreamController<String>.broadcast();
 
   List<WhiteboardElement>? _cache;
@@ -63,8 +69,11 @@ class WhiteboardController extends ChangeNotifier {
   bool offline = false;
   WhiteboardViewState viewState = const WhiteboardViewState();
   WhiteboardTool tool = WhiteboardTool.pen;
-  Color color = const Color(0xFF0F172A);
+  Color color = const Color(0xFFF8FAFC);
   double strokeWidth = 3;
+  double textSize = 24;
+  Color stickyColor = const Color(0xFFFFE08A);
+  Color commentColor = const Color(0xFF7C6CFF);
   String? selectedId;
   ShapeKind shape = ShapeKind.rectangle;
   bool fillShapes = false;
@@ -87,10 +96,7 @@ class WhiteboardController extends ChangeNotifier {
   List<RemoteCursor> get cursors => _cursors.values.toList(growable: false);
   List<WhiteboardElement> get elements => _cache ??= _elements.values.toList(growable: false);
   WhiteboardElement? get selected => selectedId == null ? null : _elements[selectedId];
-  bool get isDarkCanvas {
-    final bg = parseHexColor(viewState.backgroundColor) ?? Colors.white;
-    return bg.computeLuminance() < 0.4;
-  }
+  bool get isDarkCanvas => true;
 
   void _touch() {
     _cache = null;
@@ -200,7 +206,7 @@ class WhiteboardController extends ChangeNotifier {
 
     if (!rejoin) {
       viewState = WhiteboardViewState.fromJson(data['viewState'] ?? content['viewState']);
-      color = isDarkCanvas ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A);
+      color = const Color(0xFFF8FAFC);
     }
 
     _users.clear();
@@ -388,6 +394,21 @@ class WhiteboardController extends ChangeNotifier {
     _touch();
   }
 
+  void setTextSize(double next) {
+    textSize = next;
+    _touch();
+  }
+
+  void setStickyColor(Color next) {
+    stickyColor = next;
+    _touch();
+  }
+
+  void setCommentColor(Color next) {
+    commentColor = next;
+    _touch();
+  }
+
   void setColor(Color next) {
     color = next;
     _touch();
@@ -445,14 +466,166 @@ class WhiteboardController extends ChangeNotifier {
     if (rounded.length == 1) {
       rounded.add([rounded.first[0] + 0.1, rounded.first[1]]);
     }
+    final highlight = tool == WhiteboardTool.highlighter;
     final el = WhiteboardElement({
       'id': _newId(),
       'type': 'stroke',
       'points': rounded,
       'strokeColor': colorToHex(color),
-      'strokeWidth': strokeWidth,
+      'strokeWidth': liveStrokeWidth,
+      if (highlight) 'highlight': true,
+      if (highlight) 'opacity': 0.4,
     });
     _addLocal(el);
+  }
+
+  double get liveStrokeWidth => tool == WhiteboardTool.highlighter ? strokeWidth * 4 + 6 : strokeWidth;
+  bool get liveHighlight => tool == WhiteboardTool.highlighter;
+
+  void placeSticky(Offset p, String text) {
+    final value = text.trim();
+    if (value.isEmpty) return;
+    final el = WhiteboardElement({
+      'id': _newId(),
+      'type': 'sticky',
+      'x': WhiteboardElement.round(p.dx - 85),
+      'y': WhiteboardElement.round(p.dy - 85),
+      'width': 170,
+      'height': 170,
+      'text': value,
+      'fillColor': colorToHex(stickyColor),
+    });
+    _addLocal(el);
+  }
+
+  void placeComment(Offset p, String text) {
+    final value = text.trim();
+    if (value.isEmpty) return;
+    final tp = TextPainter(
+      text: TextSpan(text: value, style: const TextStyle(fontSize: 16, height: 1.25)),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: 220);
+    final width = tp.width + 28;
+    final height = tp.height + 22;
+    tp.dispose();
+    final el = WhiteboardElement({
+      'id': _newId(),
+      'type': 'comment',
+      'x': WhiteboardElement.round(p.dx),
+      'y': WhiteboardElement.round(p.dy - height - 12),
+      'width': WhiteboardElement.round(width),
+      'height': WhiteboardElement.round(height),
+      'text': value,
+      'fillColor': colorToHex(commentColor),
+    });
+    _addLocal(el);
+  }
+
+  void addImage(Offset center, String url, double width, double height) {
+    final el = WhiteboardElement({
+      'id': _newId(),
+      'type': 'image',
+      'x': WhiteboardElement.round(center.dx - width / 2),
+      'y': WhiteboardElement.round(center.dy - height / 2),
+      'width': WhiteboardElement.round(width),
+      'height': WhiteboardElement.round(height),
+      'url': url,
+    });
+    _addLocal(el);
+  }
+
+  ui.Image? imageFor(String url) {
+    final cached = _images[url];
+    if (cached != null) return cached;
+    if (url.isEmpty || !_loadingImages.add(url)) return null;
+    final stream = NetworkImage(url).resolve(ImageConfiguration.empty);
+    late ImageStreamListener listener;
+    listener = ImageStreamListener(
+      (info, _) {
+        _images[url] = info.image.clone();
+        stream.removeListener(listener);
+        scheduleMicrotask(() {
+          if (!_disposed) _touch();
+        });
+      },
+      onError: (_, __) => stream.removeListener(listener),
+    );
+    stream.addListener(listener);
+    return null;
+  }
+
+  void insertTemplate(WhiteboardTemplate kind, Offset center) {
+    const lineColor = '#8B8FA8';
+    String id() => _newId();
+    WhiteboardElement frame(double x, double y, double w, double h, String title) => WhiteboardElement({
+          'id': id(),
+          'type': 'frame',
+          'x': WhiteboardElement.round(x),
+          'y': WhiteboardElement.round(y),
+          'width': w,
+          'height': h,
+          'text': title,
+        });
+    WhiteboardElement box(double x, double y, double w, double h) => WhiteboardElement({
+          'id': id(),
+          'type': 'rectangle',
+          'x': WhiteboardElement.round(x),
+          'y': WhiteboardElement.round(y),
+          'width': w,
+          'height': h,
+          'strokeColor': lineColor,
+          'strokeWidth': 2,
+          'fillColor': 'transparent',
+        });
+    WhiteboardElement line(double x1, double y1, double x2, double y2) => WhiteboardElement({
+          'id': id(),
+          'type': 'line',
+          'points': [
+            [WhiteboardElement.round(x1), WhiteboardElement.round(y1)],
+            [WhiteboardElement.round(x2), WhiteboardElement.round(y2)],
+          ],
+          'strokeColor': lineColor,
+          'strokeWidth': 2,
+        });
+    final items = <WhiteboardElement>[];
+    switch (kind) {
+      case WhiteboardTemplate.frame:
+        items.add(frame(center.dx - 180, center.dy - 120, 360, 240, 'Frame'));
+      case WhiteboardTemplate.kanban:
+        const titles = ['To do', 'In progress', 'Done'];
+        for (var i = 0; i < 3; i++) {
+          items.add(frame(center.dx - 330 + i * 226, center.dy - 190, 210, 380, titles[i]));
+        }
+      case WhiteboardTemplate.matrix:
+        final x = center.dx - 200;
+        final y = center.dy - 200;
+        items
+          ..add(box(x, y, 400, 400))
+          ..add(line(x + 200, y, x + 200, y + 400))
+          ..add(line(x, y + 200, x + 400, y + 200));
+      case WhiteboardTemplate.table:
+        final x = center.dx - 180;
+        final y = center.dy - 90;
+        items.add(box(x, y, 360, 180));
+        for (var i = 1; i < 3; i++) {
+          items
+            ..add(line(x + i * 120, y, x + i * 120, y + 180))
+            ..add(line(x, y + i * 60, x + 360, y + i * 60));
+        }
+    }
+    _addMany(items);
+  }
+
+  void _addMany(List<WhiteboardElement> items) {
+    if (items.isEmpty) return;
+    for (final el in items) {
+      _elements[el.id] = el;
+    }
+    _record(_UndoAction(added: items));
+    _touch();
+    for (final el in items) {
+      _emit('whiteboard:draw-element', {'boardId': boardId, 'element': el.toJson()});
+    }
   }
 
   void addText(Offset p, WhiteboardTextResult result) {
@@ -473,11 +646,23 @@ class WhiteboardController extends ChangeNotifier {
   void updateText(String id, WhiteboardTextResult result) {
     final old = _elements[id];
     final value = result.text.trim();
-    if (old == null || old.type != 'text' || value.isEmpty) return;
-    final json = Map<String, dynamic>.from(old.json)
-      ..['text'] = value
-      ..['fontSize'] = result.fontSize
-      ..['color'] = colorToHex(result.color);
+    if (old == null || value.isEmpty) return;
+    final json = Map<String, dynamic>.from(old.json)..['text'] = value;
+    if (old.type == 'text') {
+      json
+        ..['fontSize'] = result.fontSize
+        ..['color'] = colorToHex(result.color);
+    }
+    if (old.type == 'comment') {
+      final tp = TextPainter(
+        text: TextSpan(text: value, style: const TextStyle(fontSize: 16, height: 1.25)),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: 220);
+      json
+        ..['width'] = WhiteboardElement.round(tp.width + 28)
+        ..['height'] = WhiteboardElement.round(tp.height + 22);
+      tp.dispose();
+    }
     final next = WhiteboardElement(json);
     _elements[id] = next;
     _record(_UndoAction(before: [old], after: [next]));
@@ -753,6 +938,10 @@ class WhiteboardController extends ChangeNotifier {
     }
     _detach();
     _notices.close();
+    for (final image in _images.values) {
+      image.dispose();
+    }
+    _images.clear();
     super.dispose();
   }
 }
@@ -769,18 +958,36 @@ double _segmentDistance(Offset p, Offset a, Offset b) {
 final Map<String, TextPainter> _textCache = {};
 
 TextPainter layoutText(WhiteboardElement e) {
-  final key = '${e.id}|${e.text}|${e.fontSize}|${e.textColor.value}';
+  final textColor = e.textColor.computeLuminance() < 0.05 ? const Color(0xFFF8FAFC) : e.textColor;
+  final key = '${e.id}|${e.text}|${e.fontSize}|${textColor.value}';
   final cached = _textCache[key];
   if (cached != null) return cached;
   if (_textCache.length > 300) _textCache.clear();
   final painter = TextPainter(
     text: TextSpan(
       text: e.text,
-      style: TextStyle(color: e.textColor, fontSize: e.fontSize, height: 1.2),
+      style: TextStyle(color: textColor, fontSize: e.fontSize, height: 1.2),
     ),
     textDirection: TextDirection.ltr,
   )..layout(maxWidth: 4000);
   _textCache[key] = painter;
+  return painter;
+}
+
+final Map<String, TextPainter> _boxTextCache = {};
+
+TextPainter layoutBoxText(WhiteboardElement e, {required double maxWidth, required double fontSize, required Color color, int? maxLines}) {
+  final key = '${e.id}|${e.text}|$maxWidth|$fontSize|${color.value}|$maxLines';
+  final cached = _boxTextCache[key];
+  if (cached != null) return cached;
+  if (_boxTextCache.length > 300) _boxTextCache.clear();
+  final painter = TextPainter(
+    text: TextSpan(text: e.text, style: TextStyle(color: color, fontSize: fontSize, height: 1.25)),
+    textDirection: TextDirection.ltr,
+    maxLines: maxLines,
+    ellipsis: maxLines == null ? null : '…',
+  )..layout(maxWidth: maxWidth);
+  _boxTextCache[key] = painter;
   return painter;
 }
 
@@ -807,6 +1014,11 @@ Rect elementBounds(WhiteboardElement e) {
     case 'diamond':
     case 'triangle':
       return Rect.fromLTWH(e.x, e.y, e.width, e.height).inflate(e.strokeWidth / 2);
+    case 'sticky':
+    case 'comment':
+    case 'image':
+    case 'frame':
+      return Rect.fromLTWH(e.x, e.y, e.width, e.height);
     default:
       return Rect.zero;
   }
@@ -819,6 +1031,9 @@ bool elementHit(WhiteboardElement e, Offset p, double tolerance) {
   if (e.type == 'rectangle' || e.type == 'ellipse' || e.type == 'diamond' || e.type == 'triangle') {
     if (e.fillColor != null) return true;
     return !bounds.deflate(tolerance + e.strokeWidth).contains(p);
+  }
+  if (e.type == 'frame') {
+    return !bounds.deflate(tolerance + 6).contains(p) || p.dy < bounds.top + 28;
   }
   if (e.isPointBased) {
     final pts = e.points;
