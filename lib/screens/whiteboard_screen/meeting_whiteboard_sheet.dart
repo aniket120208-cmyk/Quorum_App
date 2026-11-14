@@ -1,26 +1,40 @@
 import 'package:flutter/material.dart';
 import 'package:quorum_app/api/api_exception.dart';
-import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/api/whiteboard_repository.dart';
-import 'package:quorum_app/models/organization_models.dart';
 import 'package:quorum_app/models/whiteboard_models.dart';
 import 'package:quorum_app/screens/organization_screen/organization_sheets.dart';
 import 'package:quorum_app/screens/organization_screen/organization_widgets.dart';
 import 'whiteboard_list_screen.dart';
 import 'whiteboard_sheets.dart';
 
-enum _View { meeting, organizations, organizationBoards }
+enum _View { meeting, organizationBoards }
 
 class MeetingWhiteboardSheet extends StatefulWidget {
-  const MeetingWhiteboardSheet({super.key, required this.meetingCode});
+  const MeetingWhiteboardSheet({
+    super.key,
+    required this.meetingCode,
+    required this.organizationId,
+    this.organizationName = '',
+  });
   final String meetingCode;
-  static Future<Whiteboard?> show(BuildContext context, String meetingCode) {
+  final String organizationId;
+  final String organizationName;
+  static Future<Whiteboard?> show(
+    BuildContext context,
+    String meetingCode, {
+    required String organizationId,
+    String organizationName = '',
+  }) {
     return showModalBottomSheet<Whiteboard>(
       context: context,
       isScrollControlled: true,
       backgroundColor: orgCard,
       shape: orgSheetShape,
-      builder: (_) => MeetingWhiteboardSheet(meetingCode: meetingCode),
+      builder: (_) => MeetingWhiteboardSheet(
+        meetingCode: meetingCode,
+        organizationId: organizationId,
+        organizationName: organizationName,
+      ),
     );
   }
 
@@ -30,12 +44,9 @@ class MeetingWhiteboardSheet extends StatefulWidget {
 
 class _MeetingWhiteboardSheetState extends State<MeetingWhiteboardSheet> {
   final _boards = WhiteboardRepository.instance;
-  final _orgs = OrganizationRepository.instance;
   _View _view = _View.meeting;
   List<Whiteboard> _meetingBoards = const [];
-  List<Organization> _organizations = const [];
   List<Whiteboard> _orgBoards = const [];
-  Organization? _org;
   bool _loading = true;
   bool _busy = false;
   String? _error;
@@ -68,28 +79,18 @@ class _MeetingWhiteboardSheetState extends State<MeetingWhiteboardSheet> {
         _meetingBoards = await _boards.meetingBoards(widget.meetingCode);
       });
 
-  Future<void> _loadOrganizations() => _guarded(() async {
-        _view = _View.organizations;
-        _organizations = await _orgs.organizations();
-      });
-
-  Future<void> _loadOrgBoards(Organization org) => _guarded(() async {
+  Future<void> _loadOrgBoards() => _guarded(() async {
         _view = _View.organizationBoards;
-        _org = org;
-        final page = await _boards.list(org.id, limit: 50);
+        final page = await _boards.list(widget.organizationId, limit: 50);
         _orgBoards = page.items;
       });
 
   void _back() {
-    if (_view == _View.organizationBoards) {
-      _loadOrganizations();
-    } else {
-      setState(() {
-        _view = _View.meeting;
-        _error = null;
-      });
-      _loadMeeting();
-    }
+    setState(() {
+      _view = _View.meeting;
+      _error = null;
+    });
+    _loadMeeting();
   }
 
   Future<void> _openBoard(Whiteboard board) async {
@@ -129,10 +130,8 @@ class _MeetingWhiteboardSheetState extends State<MeetingWhiteboardSheet> {
     switch (_view) {
       case _View.meeting:
         return 'Whiteboards';
-      case _View.organizations:
-        return 'Choose organization';
       case _View.organizationBoards:
-        return _org?.name ?? 'Boards';
+        return widget.organizationName.isEmpty ? 'Organization boards' : widget.organizationName;
     }
   }
 
@@ -186,10 +185,10 @@ class _MeetingWhiteboardSheetState extends State<MeetingWhiteboardSheet> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: _busy ? null : _loadOrganizations,
+                        onPressed: _busy ? null : _loadOrgBoards,
                         icon: const Icon(Icons.business_rounded, size: 18, color: orgTeal),
                         label: const Text(
-                          'From organization',
+                          'Organization boards',
                           style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
                         ),
                         style: OutlinedButton.styleFrom(
@@ -231,10 +230,8 @@ class _MeetingWhiteboardSheetState extends State<MeetingWhiteboardSheet> {
                 switch (_view) {
                   case _View.meeting:
                     _loadMeeting();
-                  case _View.organizations:
-                    _loadOrganizations();
                   case _View.organizationBoards:
-                    if (_org != null) _loadOrgBoards(_org!);
+                    _loadOrgBoards();
                 }
               },
               child: const Text('Retry', style: TextStyle(color: orgTeal, fontWeight: FontWeight.w700)),
@@ -249,12 +246,6 @@ class _MeetingWhiteboardSheetState extends State<MeetingWhiteboardSheet> {
           _meetingBoards,
           'No whiteboards in this meeting yet',
           (b) => _row(Icons.draw_rounded, b.name, whiteboardAgo(b.updatedAt), () => _openBoard(b)),
-        );
-      case _View.organizations:
-        return _list<Organization>(
-          _organizations,
-          'You are not part of any organization',
-          (o) => _row(Icons.business_rounded, o.name, orgRoleLabel(o.role), () => _loadOrgBoards(o)),
         );
       case _View.organizationBoards:
         return _list<Whiteboard>(

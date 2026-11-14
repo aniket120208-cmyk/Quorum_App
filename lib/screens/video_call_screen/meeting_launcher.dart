@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:quorum_app/api/current_user.dart';
+import 'package:quorum_app/api/deep_link_router.dart';
 import 'package:quorum_app/api/meeting_api.dart';
 import 'package:quorum_app/api/meeting_history_store.dart';
 import 'package:quorum_app/app_navigator.dart';
@@ -22,6 +23,7 @@ class MeetingLauncher {
 
     final uri = Uri.tryParse(trimmed);
     if (uri == null || !uri.hasScheme) return false;
+    if (await DeepLinkRouter.tryOpen(uri)) return true;
     try {
       return await launchUrl(uri, mode: LaunchMode.externalApplication);
     } catch (_) {

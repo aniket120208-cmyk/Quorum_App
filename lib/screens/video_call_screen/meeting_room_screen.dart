@@ -10,13 +10,20 @@ import 'package:quorum_app/api/auth_service.dart';
 import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/meeting_api.dart';
 import 'package:quorum_app/api/meeting_service.dart';
+import 'package:quorum_app/api/recording_uploader.dart';
+import 'package:quorum_app/api/system_pip_service.dart';
+import 'package:quorum_app/screens/recording_screen/meeting_recordings_screen.dart';
+import 'package:quorum_app/screens/recording_screen/recording_widgets.dart';
 import 'package:quorum_app/models/meeting_models.dart';
+import 'package:quorum_app/screens/document_screen/meeting_document_sheet.dart';
+import 'package:quorum_app/screens/organization_screen/organization_widgets.dart' show orgConfirm;
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
 import 'package:quorum_app/screens/whiteboard_screen/meeting_whiteboard_sheet.dart';
 import 'package:quorum_app/screens/whiteboard_screen/whiteboard_screen.dart';
 import 'package:quorum_app/widgets/poll_widgets.dart';
 import 'widgets/call_action_button.dart';
 import 'widgets/draggable_pip_view.dart';
+import 'widgets/meeting_document_panel.dart';
 import 'widgets/floating_reactions.dart';
 
 enum _Phase { lobby, joining, waiting, inCall, leaving }
@@ -24,6 +31,28 @@ enum _Phase { lobby, joining, waiting, inCall, leaving }
 enum _LeaveChoice { stay, leave, endForAll }
 
 String _initial(String name) => name.isEmpty ? '?' : name.characters.first.toUpperCase();
+
+Widget _callAvatar({required String name, String? imageUrl, required double radius, required double fontSize}) {
+  final bg = AppColors.primary.withValues(alpha: 0.3);
+  final fallback = CircleAvatar(
+    radius: radius,
+    backgroundColor: bg,
+    child: Text(_initial(name), style: TextStyle(fontSize: fontSize, color: Colors.white)),
+  );
+  if (imageUrl == null || imageUrl.isEmpty) return fallback;
+  return ClipOval(
+    child: SizedBox(
+      width: radius * 2,
+      height: radius * 2,
+      child: Image.network(
+        imageUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => fallback,
+        loadingBuilder: (_, child, progress) => progress == null ? child : fallback,
+      ),
+    ),
+  );
+}
 
 class MeetingRoomScreen extends StatefulWidget {
   const MeetingRoomScreen({
@@ -44,10 +73,18 @@ class MeetingRoomScreen extends StatefulWidget {
 class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   MeetingService? _svcOrNull;
   StreamSubscription<String>? _noticeSub;
+  StreamSubscription<RecordingJob>? _recordingJobSub;
   bool _permissionDenied = false;
   bool _checkingMeeting = true;
   bool _whiteboardAllowed = false;
+  bool _documentsAllowed = false;
+  String _organizationId = '';
+  String _organizationName = '';
   bool _mediaReady = false;
+  bool _docPanelOpen = false;
+  String? _lastDocId;
+  String _meetingId = '';
+  final GlobalKey _callKey = GlobalKey();
   String? _lobbyError;
   _Phase _phase = _Phase.lobby;
   bool _controlsVisible = true;
@@ -56,6 +93,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   final ValueNotifier<int> _seconds = ValueNotifier<int>(0);
   Timer? _callTimer;
   Timer? _hideTimer;
+  final ScrollController _gridController = ScrollController();
 
   MeetingService get _svc => _svcOrNull!;
   String get _link => MeetingApi.linkFor(widget.meetingCode);
@@ -66,15 +104,42 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   @override
   void initState() {
     super.initState();
+    SystemPipService.instance.active.addListener(_onPipChanged);
     _bootstrap();
+  }
+
+  void _onPipChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _minimize() async {
+    final ok = await SystemPipService.instance.enter();
+    if (!ok && mounted) _snack('Picture in picture is not available on this device');
+  }
+
+  Widget _buildPipView() {
+    final remote = _remote;
+    if (remote.isEmpty) return _selfBase();
+    RemotePeer pick = remote.first;
+    for (final p in remote) {
+      if (p.isScreenSharing) {
+        pick = p;
+        break;
+      }
+    }
+    return _remoteTile(pick, rounded: false);
   }
 
   @override
   void dispose() {
+    SystemPipService.instance.active.removeListener(_onPipChanged);
+    SystemPipService.instance.setAutoEnter(false);
     _callTimer?.cancel();
     _hideTimer?.cancel();
     _noticeSub?.cancel();
+    _recordingJobSub?.cancel();
     _seconds.dispose();
+    _gridController.dispose();
     _svcOrNull?.removeListener(_onService);
     _svcOrNull?.dispose();
     super.dispose();
@@ -83,6 +148,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   Future<void> _bootstrap() async {
     bool isHost = widget.isHostHint;
     bool whiteboardAllowed = false;
+    bool documentsAllowed = false;
+    String organizationId = '';
+    String organizationName = '';
+    String meetingId = '';
     try {
       if (!CurrentUser.isLoaded) {
         CurrentUser.setFromProfile(await AuthService.instance.getUserProfile());
@@ -90,7 +159,11 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       if (!CurrentUser.isLoaded) throw ApiException('Unable to load your profile.');
       final info = await MeetingApi.instance.getMeeting(widget.meetingCode);
       isHost = isHost || (info.hostId.isNotEmpty && info.hostId == CurrentUser.id);
-      whiteboardAllowed = info.scope != MeetingScope.personal;
+      organizationId = info.organizationId ?? '';
+      organizationName = info.organizationName ?? '';
+      whiteboardAllowed = info.scope != MeetingScope.personal && organizationId.isNotEmpty;
+      documentsAllowed = info.scope == MeetingScope.team && organizationId.isNotEmpty;
+      meetingId = info.id;
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -106,13 +179,26 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       meetingCode: widget.meetingCode,
       userId: CurrentUser.id,
       userName: CurrentUser.name,
+      userAvatar: CurrentUser.avatar,
       isHost: isHost,
     )..addListener(_onService);
     _svcOrNull = svc;
     _noticeSub = svc.notices.listen(_snack);
+    _recordingJobSub ??= RecordingUploader.instance.finished.listen((job) {
+      if (job.meetingCode != widget.meetingCode) return;
+      if (job.stage == RecordingJobStage.done) {
+        _snack('Recording uploaded. It will be ready shortly.');
+      } else if (job.stage == RecordingJobStage.failed) {
+        _snack('Recording upload failed. You can retry it.');
+      }
+    });
     setState(() {
       _checkingMeeting = false;
       _whiteboardAllowed = whiteboardAllowed;
+      _documentsAllowed = documentsAllowed;
+      _organizationId = organizationId;
+      _organizationName = organizationName;
+      _meetingId = meetingId;
     });
 
     final cam = await Permission.camera.request();
@@ -133,6 +219,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       case MeetingPhase.inCall:
         if (_phase == _Phase.joining || _phase == _Phase.waiting) {
           _phase = _Phase.inCall;
+          SystemPipService.instance.setAutoEnter(true);
           _joinedAt = DateTime.now();
           _callTimer = Timer.periodic(const Duration(seconds: 1), (_) => _seconds.value++);
           _scheduleHideControls();
@@ -156,6 +243,11 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         break;
       default:
         break;
+    }
+    final docId = _svc.activeDocument?.documentId;
+    if (docId != _lastDocId) {
+      _lastDocId = docId;
+      _docPanelOpen = docId != null;
     }
     setState(() {});
   }
@@ -222,7 +314,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         title: const Text('Leave meeting?'),
         content: Text(
           _svc.isHost
-              ? 'You can leave and let others continue, or end the meeting for everyone.'
+              ? (_svc.isCapturingRecording
+                  ? 'Leaving will stop and upload the recording. You can leave and let others continue, or end the meeting for everyone.'
+                  : 'You can leave and let others continue, or end the meeting for everyone.')
               : 'You can rejoin anytime with the same code.',
         ),
         actions: [
@@ -265,6 +359,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
     _callTimer?.cancel();
     _hideTimer?.cancel();
+    SystemPipService.instance.setAutoEnter(false);
 
     final result = MeetingResult(
       code: widget.meetingCode,
@@ -330,7 +425,12 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
   Future<void> _openWhiteboard() async {
     _hideTimer?.cancel();
-    final board = await MeetingWhiteboardSheet.show(context, widget.meetingCode);
+    final board = await MeetingWhiteboardSheet.show(
+      context,
+      widget.meetingCode,
+      organizationId: _organizationId,
+      organizationName: _organizationName,
+    );
     if (board != null && mounted) {
       await Navigator.of(context).push(
         MaterialPageRoute(
@@ -345,6 +445,89 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     _showControls();
   }
 
+  Future<void> _openDocuments() async {
+    _hideTimer?.cancel();
+    final choice = await MeetingDocumentSheet.show(
+      context,
+      meetingCode: widget.meetingCode,
+      meetingTitle: widget.title,
+      organizationId: _organizationId,
+      meetingId: _meetingId,
+      activeDocumentId: _svc.activeDocument?.documentId,
+    );
+    if (choice != null && mounted) {
+      _svc.openDocument(choice.id, choice.title);
+      setState(() => _docPanelOpen = true);
+    }
+    _showControls();
+  }
+
+  Future<void> _closeDocumentForEveryone() async {
+    final ok = await orgConfirm(
+      context,
+      title: 'Close for everyone?',
+      body: 'The document will close for all participants. Their edits stay saved.',
+      action: 'Close',
+    );
+    if (ok && mounted) {
+      _svc.closeDocument();
+      setState(() => _docPanelOpen = false);
+    }
+  }
+
+  Future<void> _toggleRecording() async {
+    final svc = _svc;
+    if (svc.recordingBusy) return;
+    if (svc.isRecording) {
+      final ok = await orgConfirm(
+        context,
+        title: 'Stop recording?',
+        body: 'The recording will be uploaded and processed. This can take a few minutes.',
+        action: 'Stop',
+      );
+      if (!ok || !mounted) return;
+      final error = await svc.stopRecording();
+      if (error != null) _snack(error);
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Record this meeting?'),
+        content: const Text(
+          'Everyone in the meeting will be notified. The recording is stored for 7 days and can be summarized with AI.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Start recording', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final error = await svc.startRecording();
+    if (error != null) _snack(error);
+  }
+
+  Future<void> _openRecordings() async {
+    _hideTimer?.cancel();
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MeetingRecordingsScreen(
+          meetingCode: widget.meetingCode,
+          title: widget.title,
+          isHost: _svc.isHost,
+        ),
+      ),
+    );
+    _showControls();
+  }
+
   Future<void> _showMoreMenu() async {
     _hideTimer?.cancel();
     await showModalBottomSheet<void>(
@@ -352,7 +535,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -407,6 +590,27 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                   _toggleScreenShare();
                 },
               ),
+              if (_documentsAllowed)
+                ListTile(
+                  leading: const Icon(Icons.description_rounded, color: Colors.white),
+                  title: Text(
+                    _svc.activeDocument == null ? 'Documents' : 'Switch document',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _openDocuments();
+                  },
+                ),
+              if (_svc.activeDocument != null && !_docPanelOpen)
+                ListTile(
+                  leading: const Icon(Icons.article_rounded, color: Color(0xFF14B8A6)),
+                  title: const Text('Show open document', style: TextStyle(color: Colors.white)),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    setState(() => _docPanelOpen = true);
+                  },
+                ),
               if (_whiteboardAllowed)
                 ListTile(
                   leading: const Icon(Icons.draw_rounded, color: Colors.white),
@@ -427,6 +631,29 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                   _showPolls();
                 },
               ),
+              if (_svc.isHost)
+                ListTile(
+                  leading: Icon(
+                    _svc.isRecording ? Icons.stop_circle_rounded : Icons.fiber_manual_record_rounded,
+                    color: Colors.redAccent,
+                  ),
+                  title: Text(
+                    _svc.isRecording ? 'Stop recording' : 'Record meeting',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _toggleRecording();
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.video_library_rounded, color: Colors.white),
+                title: const Text('Recordings', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _openRecordings();
+                },
+              ),
               ListTile(
                 leading: const Icon(Icons.ios_share_rounded, color: Colors.white),
                 title: const Text('Share invite link', style: TextStyle(color: Colors.white)),
@@ -437,6 +664,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               ),
             ],
           ),
+        ),
         ),
       ),
     );
@@ -661,6 +889,12 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (SystemPipService.instance.active.value && _phase == _Phase.inCall) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: _buildPipView(),
+      );
+    }
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -671,9 +905,33 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         body: switch (_phase) {
           _Phase.lobby => _buildLobby(),
           _Phase.leaving => _buildLeaving(),
-          _ => _buildCall(),
+          _ => _buildCallLayout(),
         },
       ),
+    );
+  }
+
+  Widget _buildCallLayout() {
+    final doc = _svcOrNull?.activeDocument;
+    final docked = doc != null && _docPanelOpen && _phase == _Phase.inCall;
+    final call = KeyedSubtree(key: _callKey, child: _buildCall(docked: docked));
+    if (!docked) return call;
+    final keyboard = MediaQuery.of(context).viewInsets.bottom > 0;
+    return Column(
+      children: [
+        if (!keyboard) Expanded(key: const ValueKey('call_slot'), flex: 9, child: call),
+        Expanded(
+          key: const ValueKey('document_slot'),
+          flex: keyboard ? 1 : 11,
+          child: MeetingDocumentPanel(
+            document: doc,
+            meetingCode: widget.meetingCode,
+            canClose: _svc.canCloseDocument,
+            onHide: () => setState(() => _docPanelOpen = false),
+            onClose: _closeDocumentForEveryone,
+          ),
+        ),
+      ],
     );
   }
 
@@ -735,11 +993,14 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircleAvatar(
-              radius: 40,
-              backgroundColor: AppColors.primary.withValues(alpha: 0.25),
-              child: const Icon(Icons.person_rounded, size: 46, color: Colors.white),
-            ),
+            if (CurrentUser.avatar != null)
+              _callAvatar(name: CurrentUser.name, imageUrl: CurrentUser.avatar, radius: 40, fontSize: 30)
+            else
+              CircleAvatar(
+                radius: 40,
+                backgroundColor: AppColors.primary.withValues(alpha: 0.25),
+                child: const Icon(Icons.person_rounded, size: 46, color: Colors.white),
+              ),
             const SizedBox(height: 12),
             Text(message, style: const TextStyle(color: Colors.white54, fontSize: 13)),
           ],
@@ -906,8 +1167,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     );
   }
 
-  Widget _buildCall() {
-    final pad = MediaQuery.of(context).padding;
+  Widget _buildCall({bool docked = false}) {
+    final basePad = MediaQuery.of(context).padding;
+    final pad = docked ? basePad.copyWith(bottom: 0) : basePad;
+    final controlsVisible = _controlsVisible || docked;
     final joining = _phase == _Phase.joining || _phase == _Phase.waiting;
     final inCall = _phase == _Phase.inCall;
     final alone = _remote.isEmpty;
@@ -964,11 +1227,20 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             ),
           ),
           Positioned(
+            top: pad.top + 54,
+            left: 0,
+            right: 0,
+            child: ListenableBuilder(
+              listenable: RecordingUploader.instance,
+              builder: (context, _) => _recordingStatusStack(),
+            ),
+          ),
+          Positioned(
             top: pad.top + 8,
             left: 16,
             right: 16,
             child: _fade(
-              visible: _controlsVisible,
+              visible: controlsVisible,
               hidden: const Offset(0, -1),
               child: Row(
                 children: [
@@ -1023,6 +1295,13 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                   ),
                   IconButton(
                     style: IconButton.styleFrom(backgroundColor: Colors.black45),
+                    tooltip: 'Minimize',
+                    icon: const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white),
+                    onPressed: _minimize,
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton(
+                    style: IconButton.styleFrom(backgroundColor: Colors.black45),
                     icon: Icon(
                       _svc.soundOn ? Icons.volume_up_rounded : Icons.volume_off_rounded,
                       color: Colors.white,
@@ -1054,18 +1333,25 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                     child: _chip('🔔', '${_svc.waitingList.length} waiting'),
                   ),
                 ],
+                if (_svc.activeDocument != null && !_docPanelOpen) ...[
+                  if (_svc.isHost && _svc.waitingList.isNotEmpty) const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () => setState(() => _docPanelOpen = true),
+                    child: _chip('📄', 'Document open'),
+                  ),
+                ],
                 const Spacer(),
                 if (_micMuted) _chip(null, 'Muted', icon: Icons.mic_off_rounded),
               ],
             ),
           ),
-          if (alone)
+          if (alone && !docked)
             Positioned(
               left: 16,
               right: 16,
               bottom: pad.bottom + 128,
               child: _fade(
-                visible: _controlsVisible,
+                visible: controlsVisible,
                 hidden: const Offset(0, 0.6),
                 child: Container(
                   padding: const EdgeInsets.all(16),
@@ -1127,7 +1413,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             right: 20,
             bottom: pad.bottom + 12,
             child: _fade(
-              visible: _controlsVisible,
+              visible: controlsVisible,
               hidden: const Offset(0, 1),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
@@ -1246,6 +1532,36 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     );
   }
 
+  Widget _recordingStatusStack() {
+    final jobs = RecordingUploader.instance
+        .jobsFor(widget.meetingCode)
+        .where((j) => j.stage != RecordingJobStage.done)
+        .toList();
+    final recording = _svc.recording;
+    return IgnorePointer(
+      ignoring: jobs.isEmpty,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_svc.isRecording && recording != null)
+            _RecordingBanner(
+              startedAt: recording.startedAt ?? DateTime.now(),
+              startedBy: recording.startedBy?.id == CurrentUser.id ? 'You' : recording.startedBy?.name,
+            ),
+          for (final job in jobs)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: RecUploadCard(
+                job: job,
+                onRetry: () => RecordingUploader.instance.retry(job),
+                onDismiss: () => RecordingUploader.instance.dismiss(job),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildJoiningOverlay() {
     return Positioned.fill(
       child: Container(
@@ -1310,7 +1626,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         builder: (context, constraints) {
           final visibleRows = rowCount < 2 ? rowCount : 2;
           final rowHeight = constraints.maxHeight / visibleRows;
-          return ListView.builder(
+          final list = ListView.builder(
+            controller: _gridController,
             physics: rowCount > 2
                 ? const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics())
                 : const NeverScrollableScrollPhysics(),
@@ -1332,7 +1649,102 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               );
             },
           );
+          if (rowCount <= 2) return list;
+          return Stack(
+            children: [
+              list,
+              _gridScrollIndicator(
+                rowCount: rowCount,
+                rowHeight: rowHeight,
+                viewport: constraints.maxHeight,
+                total: n,
+                cols: cols,
+              ),
+            ],
+          );
         },
+      ),
+    );
+  }
+
+  Widget _gridScrollIndicator({
+    required int rowCount,
+    required double rowHeight,
+    required double viewport,
+    required int total,
+    required int cols,
+  }) {
+    final contentHeight = rowCount * rowHeight;
+    final maxScroll = contentHeight - viewport;
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: AnimatedBuilder(
+          animation: _gridController,
+          builder: (context, _) {
+            final offset = _gridController.hasClients ? _gridController.offset.clamp(0.0, maxScroll) : 0.0;
+            final trackHeight = viewport - 16;
+            final thumbHeight = (trackHeight * viewport / contentHeight).clamp(28.0, trackHeight);
+            final thumbTop = maxScroll <= 0 ? 0.0 : (trackHeight - thumbHeight) * (offset / maxScroll);
+            final lastVisibleRow = ((offset + viewport) / rowHeight).ceil().clamp(0, rowCount);
+            final hidden = total - lastVisibleRow * cols;
+            final hiddenCount = hidden < 0 ? 0 : hidden;
+            return Stack(
+              children: [
+                Positioned(
+                  right: 1,
+                  top: 8,
+                  bottom: 8,
+                  width: 4,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: Transform.translate(
+                        offset: Offset(0, thumbTop),
+                        child: Container(
+                          height: thumbHeight,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.75),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                if (hiddenCount > 0)
+                  Positioned(
+                    bottom: 12,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.65),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white, size: 16),
+                            const SizedBox(width: 4),
+                            Text(
+                              '$hiddenCount more',
+                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -1350,13 +1762,11 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             )
           else
             Center(
-              child: CircleAvatar(
+              child: _callAvatar(
+                name: p.name,
+                imageUrl: p.avatarUrl,
                 radius: rounded ? 32 : 48,
-                backgroundColor: AppColors.primary.withValues(alpha: 0.3),
-                child: Text(
-                  _initial(p.name),
-                  style: TextStyle(fontSize: rounded ? 24 : 36, color: Colors.white),
-                ),
+                fontSize: rounded ? 24 : 36,
               ),
             ),
           Positioned(
@@ -1674,6 +2084,97 @@ class _ChatBottomSheetState extends State<_ChatBottomSheet> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RecordingBanner extends StatefulWidget {
+  const _RecordingBanner({required this.startedAt, this.startedBy});
+  final DateTime startedAt;
+  final String? startedBy;
+
+  @override
+  State<_RecordingBanner> createState() => _RecordingBannerState();
+}
+
+class _RecordingBannerState extends State<_RecordingBanner> with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat(reverse: true);
+  Timer? _ticker;
+  int _elapsed = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+  }
+
+  void _tick() {
+    final seconds = DateTime.now().difference(widget.startedAt).inSeconds;
+    if (mounted) setState(() => _elapsed = seconds < 0 ? 0 : seconds);
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final who = widget.startedBy;
+    return Semantics(
+      liveRegion: true,
+      label: who == null ? 'This meeting is being recorded' : '$who started recording this meeting',
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.7),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.redAccent.withValues(alpha: 0.6)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FadeTransition(
+              opacity: Tween<double>(begin: 0.35, end: 1).animate(_pulse),
+              child: Container(
+                width: 10,
+                height: 10,
+                decoration: const BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle),
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Text('REC', style: TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.w800)),
+            const SizedBox(width: 8),
+            Text(
+              recDuration(_elapsed),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+            if (who != null) ...[
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  '$who started recording',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white70, fontSize: 11.5),
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );

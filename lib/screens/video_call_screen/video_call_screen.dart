@@ -13,6 +13,7 @@ import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
 import 'package:quorum_app/screens/meetings_screen/meetings_list_screen.dart';
 import 'package:quorum_app/screens/meetings_screen/schedule_meeting_sheet.dart';
 import 'package:quorum_app/screens/organization_screen/organization_sheets.dart';
+import 'package:quorum_app/screens/recording_screen/meeting_recordings_screen.dart';
 import 'meeting_launcher.dart';
 import 'meeting_room_screen.dart';
 import 'video_call_controller.dart';
@@ -564,6 +565,16 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                         ],
                       ),
                     ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Recordings',
+                  icon: const Icon(Icons.video_library_outlined, color: AppColors.textSecondary),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MeetingRecordingsScreen(meetingCode: item.code, title: item.title),
+                    ),
                   ),
                 ),
                 IconButton(
