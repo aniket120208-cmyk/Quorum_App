@@ -12,6 +12,9 @@ import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/models/organization_models.dart' show TeamMessage;
 import 'package:quorum_app/api/socket_service.dart';
 import 'package:quorum_app/api/saved_items_store.dart';
+import 'package:quorum_app/api/meeting_api.dart';
+import 'package:quorum_app/models/meeting_models.dart';
+import 'package:quorum_app/screens/video_call_screen/meeting_launcher.dart';
 import 'package:quorum_app/api/upload_service.dart';
 import 'package:quorum_app/models/chat_models.dart';
 import 'package:quorum_app/models/poll_models.dart';
@@ -43,6 +46,9 @@ class ChatRoomScreen extends StatefulWidget {
     this.initialMessageId,
     this.initialSearchQuery,
     this.team,
+    this.embedded = false,
+    this.showGroupAvatar = true,
+    this.onInfo,
   });
 
   final Conversation conversation;
@@ -51,6 +57,9 @@ class ChatRoomScreen extends StatefulWidget {
   final String? initialMessageId;
   final String? initialSearchQuery;
   final TeamChatContext? team;
+  final bool embedded;
+  final bool showGroupAvatar;
+  final Future<void> Function(BuildContext context, List<ChatUser> members)? onInfo;
 
   @override
   State<ChatRoomScreen> createState() => _ChatRoomScreenState();
@@ -81,6 +90,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   bool _hasMore = false;
   bool _loading = true;
   bool _loadingMore = false;
+  bool _showJumpToNewest = false;
+  bool _startingMeeting = false;
   String? _error;
 
   final Set<String> _typingIds = {};
@@ -319,6 +330,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   void _onScroll() {
     if (!_scrollCtrl.hasClients) return;
+    final away = _scrollCtrl.position.pixels > 300;
+    if (away != _showJumpToNewest && mounted) setState(() => _showJumpToNewest = away);
     if (_scrollCtrl.position.pixels >= _scrollCtrl.position.maxScrollExtent - 200) {
       _loadMore();
     }
@@ -362,7 +375,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   void _onGroupPicture(dynamic data) {
-    if (!_conv.isGroup || !mounted) return;
+    if (!_conv.isGroup || !mounted || widget.onInfo != null) return;
     final j = asMap(data);
     final id = (j?['conversationId'] ?? j?['groupId'])?.toString();
     if (id != null && id != _convId) return;
@@ -540,6 +553,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     try {
       final c = await _repo.conversationById(_convId, _me);
       if (!mounted || c == null) return;
+      if (widget.onInfo != null) {
+        setState(() => _conv = _conv.copyWith(isMuted: c.isMuted, mutedUntil: c.mutedUntil));
+        return;
+      }
       setState(() => _conv = c);
     } catch (_) {}
   }
@@ -626,6 +643,56 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       senderName: m.senderName,
       senderAvatar: m.senderAvatar,
     );
+  }
+
+  Future<void> _startMeeting() async {
+    if (_startingMeeting) return;
+    setState(() => _startingMeeting = true);
+    try {
+      final team = widget.team;
+      String code;
+      String link;
+      var title = _conv.titleFor(_me);
+      if (team != null) {
+        final meeting = await MeetingApi.instance.createScopedMeeting(
+          title: '${team.team.name} meeting',
+          scope: MeetingScope.team,
+          organizationId: team.organization.id,
+          teamId: team.team.id,
+        );
+        code = meeting.code;
+        link = meeting.link ?? MeetingApi.linkFor(code);
+        title = meeting.title;
+      } else {
+        final meeting = await MeetingApi.instance.createMeeting();
+        code = meeting.code;
+        link = meeting.link;
+      }
+      if (!mounted) return;
+      _sendText('Join my meeting: $link');
+      setState(() => _startingMeeting = false);
+      await MeetingLauncher.joinCode(code, title: title, isHost: true);
+    } catch (e) {
+      if (mounted) showErrorSnack(context, errorText(e));
+    } finally {
+      if (mounted && _startingMeeting) setState(() => _startingMeeting = false);
+    }
+  }
+
+  void _sendText(String text) {
+    final id = _newTempId();
+    final temp = ChatMessage(
+      id: id,
+      clientMessageId: id,
+      senderId: _me,
+      senderName: widget.currentUserName,
+      text: text,
+      createdAt: DateTime.now(),
+      status: MessageStatus.sending,
+    );
+    setState(() => _messages.insert(0, temp));
+    _scrollToNewest();
+    _dispatch(id);
   }
 
   void _send() {
@@ -1651,6 +1718,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   Future<void> _openGroupInfo() async {
+    final onInfo = widget.onInfo;
+    if (onInfo != null) {
+      await onInfo(context, _conv.members);
+      return;
+    }
     final team = widget.team;
     if (team != null) {
       await team.openInfo(context, _conv.members);
@@ -1731,6 +1803,35 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             style: TextStyle(color: textSecondary)),
       );
     }
+    return Stack(
+      children: [
+        Positioned.fill(child: _messageList()),
+        Positioned(
+          right: 16,
+          bottom: 16,
+          child: AnimatedScale(
+            scale: _showJumpToNewest ? 1 : 0,
+            duration: const Duration(milliseconds: 150),
+            child: Material(
+              color: primary,
+              shape: const CircleBorder(),
+              elevation: 4,
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: _showJumpToNewest ? _scrollToNewest : null,
+                child: const Padding(
+                  padding: EdgeInsets.all(10),
+                  child: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white, size: 26),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _messageList() {
     return ListView.builder(
       controller: _scrollCtrl,
       reverse: true,
@@ -1856,37 +1957,45 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         icon: const Icon(Icons.arrow_back_rounded),
         onPressed: _closeSearch,
       ),
-      title: TextField(
-        controller: _searchCtrl,
-        focusNode: _searchFocus,
-        autofocus: true,
-        textInputAction: TextInputAction.search,
-        cursorColor: primary,
-        style: const TextStyle(color: textPrimary, fontSize: 16),
-        decoration: const InputDecoration(
-          border: InputBorder.none,
-          hintText: 'Search messages',
-          hintStyle: TextStyle(color: textSecondary),
-        ),
-        onChanged: (value) {
-          _search.setQuery(value);
-          setState(() {});
-        },
-        onSubmitted: (value) => _search.setQuery(value, immediate: true),
-      ),
-      actions: [
-        if (_searchCtrl.text.isNotEmpty)
-          IconButton(
-            tooltip: 'Clear',
-            icon: const Icon(Icons.close_rounded),
-            onPressed: () {
-              _searchCtrl.clear();
-              _search.setQuery('');
-              setState(() {});
-              _searchFocus.requestFocus();
-            },
+      title: Padding(
+        padding: const EdgeInsets.only(right: 16),
+        child: TextField(
+          controller: _searchCtrl,
+          focusNode: _searchFocus,
+          autofocus: true,
+          textInputAction: TextInputAction.search,
+          cursorColor: primary,
+          style: const TextStyle(color: textPrimary),
+          decoration: InputDecoration(
+            hintText: 'Search messages',
+            hintStyle: const TextStyle(color: textSecondary),
+            prefixIcon: const Icon(Icons.search, color: textSecondary),
+            suffixIcon: _searchCtrl.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: 'Clear',
+                    icon: const Icon(Icons.close_rounded, color: textSecondary),
+                    onPressed: () {
+                      _searchCtrl.clear();
+                      _search.setQuery('');
+                      setState(() {});
+                      _searchFocus.requestFocus();
+                    },
+                  ),
+            filled: true,
+            fillColor: const Color(0xFF1E293B),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(24),
+              borderSide: BorderSide.none,
+            ),
           ),
-      ],
+          onChanged: (value) {
+            _search.setQuery(value);
+            setState(() {});
+          },
+          onSubmitted: (value) => _search.setQuery(value, immediate: true),
+        ),
+      ),
     );
   }
 
@@ -1994,6 +2103,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       appBar: _selecting ? _selectionBar() : _searching ? _searchBar() : AppBar(
         backgroundColor: darkBg,
         elevation: 0,
+        automaticallyImplyLeading: !widget.embedded,
         iconTheme: const IconThemeData(color: textPrimary),
         titleSpacing: 0,
         title: GestureDetector(
@@ -2001,14 +2111,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           onTap: _conv.isGroup ? _openGroupInfo : _openDirectProfile,
           child: Row(
             children: [
-              ChatAvatar(
-                name: title,
-                isGroup: _conv.isGroup,
-                imageUrl: _conv.isGroup ? _conv.avatar : _conv.directAvatar,
-                radius: 18,
-                userId: _conv.directUserIdFor(_me),
-              ),
-              const SizedBox(width: 12),
+              if (!(_conv.isGroup && !widget.showGroupAvatar)) ...[
+                ChatAvatar(
+                  name: title,
+                  isGroup: _conv.isGroup,
+                  imageUrl: _conv.isGroup ? _conv.avatar : _conv.directAvatar,
+                  radius: 18,
+                  userId: _conv.directUserIdFor(_me),
+                ),
+                const SizedBox(width: 12),
+              ],
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2044,30 +2156,30 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             icon: const Icon(Icons.search_rounded),
             onPressed: _openSearch,
           ),
-          if (widget.team != null)
-            IconButton(
-              tooltip: 'Team meetings',
-              icon: const Icon(Icons.videocam_outlined),
-              onPressed: () => widget.team!.openMeetings(context),
-            )
-          else
-            IconButton(
-              tooltip: SavedItemsStore.instance.isSaved(SavedItemType.chat, _convId) ? 'Remove from saved' : 'Save chat',
-              icon: Icon(
-                SavedItemsStore.instance.isSaved(SavedItemType.chat, _convId)
-                    ? Icons.bookmark_rounded
-                    : Icons.bookmark_border_rounded,
-              ),
-              onPressed: () => _toggleSave(SavedItemType.chat, _convId),
-            ),
+          IconButton(
+            tooltip: 'Start meeting',
+            icon: _startingMeeting
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: textPrimary),
+                  )
+                : const Icon(Icons.videocam_outlined),
+            onPressed: _startingMeeting ? null : _startMeeting,
+          ),
           PopupMenuButton<String>(
             color: surface,
             icon: const Icon(Icons.more_vert_rounded),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(25),
+            ),
             onSelected: (v) {
               final t = widget.team;
               switch (v) {
                 case 'save':
                   _toggleSave(SavedItemType.chat, _convId);
+                case 'meetings':
+                  t?.openMeetings(context);
                 case 'jira':
                   t?.openJira(context);
                 case 'github':
@@ -2089,13 +2201,28 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     style: const TextStyle(color: textPrimary),
                   ),
                 ),
+                const PopupMenuItem(value: 'meetings', child: Text('Team meetings', style: TextStyle(color: textPrimary))),
                 const PopupMenuItem(value: 'jira', child: Text('Jira tickets', style: TextStyle(color: textPrimary))),
                 const PopupMenuItem(value: 'github', child: Text('GitHub', style: TextStyle(color: textPrimary))),
                 const PopupMenuDivider(height: 1),
               ],
-              if (widget.team == null && _conv.isGroup) ...const [
-                PopupMenuItem(value: 'info', child: Text('Group info', style: TextStyle(color: textPrimary))),
-                PopupMenuDivider(height: 1),
+              if (widget.team == null) ...[
+                if (_conv.isGroup)
+                  PopupMenuItem(
+                    value: 'info',
+                    child: Text(
+                      widget.onInfo != null ? 'Team info' : 'Group info',
+                      style: const TextStyle(color: textPrimary),
+                    ),
+                  ),
+                PopupMenuItem(
+                  value: 'save',
+                  child: Text(
+                    SavedItemsStore.instance.isSaved(SavedItemType.chat, _convId) ? 'Remove from saved' : 'Save chat',
+                    style: const TextStyle(color: textPrimary),
+                  ),
+                ),
+                const PopupMenuDivider(height: 1),
               ],
               for (final a in availableChatActions(_conv))
                 PopupMenuItem<String>(
@@ -2393,6 +2520,23 @@ class _MessageBubble extends StatelessWidget {
               style: const TextStyle(color: Color(0xFFF8FAFC), fontSize: 14),
             ),
           ),
+        if (!deleted && meetingLinkOf(message.text) != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: isMe ? Colors.white.withValues(alpha: 0.22) : const Color(0xFF6366F1),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: selecting ? null : () => MeetingLauncher.join(meetingLinkOf(message.text)!),
+                icon: const Icon(Icons.videocam_rounded, size: 18, color: Colors.white),
+                label: const Text('Join meeting', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ),
       ],
     ];
 
@@ -2547,4 +2691,12 @@ class _EditMessageDialogState extends State<_EditMessageDialog> {
       ],
     );
   }
+}
+
+String? meetingLinkOf(String text) {
+  for (final match in RegExp(r'https?://\S+').allMatches(text)) {
+    final link = match.group(0)!;
+    if (MeetingApi.isQuorumLink(link) && MeetingApi.codeFromLink(link) != null) return link;
+  }
+  return null;
 }

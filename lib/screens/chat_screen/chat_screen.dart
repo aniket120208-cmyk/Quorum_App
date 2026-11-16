@@ -515,31 +515,39 @@ class _ChatListViewState extends State<ChatListView> {
         icon: const Icon(Icons.arrow_back_rounded, color: AppColors.textPrimary),
         onPressed: _closeSearch,
       ),
-      title: TextField(
-        controller: _search,
-        focusNode: _searchFocus,
-        autofocus: true,
-        textInputAction: TextInputAction.search,
-        cursorColor: AppColors.primaryLight,
-        style: const TextStyle(color: AppColors.textPrimary, fontSize: 16),
-        decoration: const InputDecoration(
-          border: InputBorder.none,
-          hintText: 'Search chats and messages',
-          hintStyle: TextStyle(color: AppColors.textMuted),
-        ),
-        onChanged: (_) => setState(() {}),
-      ),
-      actions: [
-        if (_search.text.isNotEmpty)
-          IconButton(
-            tooltip: 'Clear',
-            icon: const Icon(Icons.close_rounded, color: AppColors.textPrimary),
-            onPressed: () {
-              _search.clear();
-              setState(() {});
-            },
+      title: Padding(
+        padding: const EdgeInsets.only(right: 16),
+        child: TextField(
+          controller: _search,
+          focusNode: _searchFocus,
+          autofocus: true,
+          textInputAction: TextInputAction.search,
+          cursorColor: AppColors.primaryLight,
+          style: const TextStyle(color: AppColors.textPrimary),
+          decoration: InputDecoration(
+            hintText: 'Search chats and messages',
+            hintStyle: const TextStyle(color: AppColors.textSecondary),
+            prefixIcon: const Icon(Icons.search, color: AppColors.textSecondary),
+            suffixIcon: _search.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: 'Clear',
+                    icon: const Icon(Icons.close_rounded, color: AppColors.textSecondary),
+                    onPressed: () {
+                      _search.clear();
+                      setState(() {});
+                    },
+                  ),
+            filled: true,
+            fillColor: const Color(0xFF1E293B),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(24),
+              borderSide: BorderSide.none,
+            ),
           ),
-      ],
+          onChanged: (_) => setState(() {}),
+        ),
+      ),
     );
   }
 
