@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:quorum_app/api/notification_repository.dart';
+import 'package:quorum_app/api/presence_service.dart';
 import 'package:quorum_app/api/socket_service.dart';
 import 'package:quorum_app/models/notification_models.dart';
 import 'package:quorum_app/screens/notification_screen/notification_banner.dart';
@@ -46,7 +47,7 @@ class NotificationService {
     final item = NotificationItem.fromJson(map);
     unreadCount.value = unreadCount.value + 1;
     _incoming.add(item);
-    NotificationBanner.show(item);
+    if (!PresenceService.instance.isDnd) NotificationBanner.show(item);
   }
 
   void _onMention(dynamic raw) {
@@ -73,7 +74,7 @@ class NotificationService {
         avatar: (avatar == null || avatar.isEmpty) ? null : avatar,
       ),
     );
-    NotificationBanner.show(item);
+    if (!PresenceService.instance.isDnd) NotificationBanner.show(item);
   }
 
   Future<void> refreshUnread() async {
