@@ -5,6 +5,7 @@ import 'package:quorum_app/api/deep_link_router.dart';
 import 'package:quorum_app/api/quorumbot_controller.dart';
 import 'package:quorum_app/models/organization_models.dart';
 import 'package:quorum_app/models/quorumbot_models.dart';
+import 'package:quorum_app/screens/chat_screen/chat_widgets.dart' show AppColors;
 import 'package:quorum_app/screens/video_call_screen/meeting_launcher.dart';
 import 'package:quorum_app/widgets/quorumbot_mascot.dart';
 
@@ -417,7 +418,6 @@ class _UltronPanelState extends State<_UltronPanel> {
               ],
             ),
           ),
-          if (c.mode == UltronMode.command && c.organizations.length > 1) _orgPicker(),
           if (c.messagesFor(c.mode).isNotEmpty)
             IconButton(
               tooltip: 'Clear chat',
@@ -436,40 +436,6 @@ class _UltronPanelState extends State<_UltronPanel> {
     );
   }
 
-  Widget _orgPicker() {
-    return PopupMenuButton<Organization>(
-      tooltip: 'Workspace',
-      color: _card,
-      onSelected: c.selectOrg,
-      itemBuilder: (_) => [
-        for (final o in c.organizations)
-          PopupMenuItem(
-            value: o,
-            child: Row(
-              children: [
-                Icon(
-                  o.id == c.selectedOrg?.id ? Icons.check_circle : Icons.circle_outlined,
-                  size: 16,
-                  color: o.id == c.selectedOrg?.id ? _red : _muted,
-                ),
-                const SizedBox(width: 8),
-                Flexible(child: Text(o.name, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))),
-              ],
-            ),
-          ),
-      ],
-      child: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: _card,
-          shape: BoxShape.circle,
-          border: Border.all(color: _border),
-        ),
-        child: const Icon(Icons.business_rounded, size: 16, color: _muted),
-      ),
-    );
-  }
-
   Widget _modeBar() {
     Widget chip(UltronMode m, IconData icon, String label) {
       final on = c.mode == m;
@@ -480,14 +446,14 @@ class _UltronPanelState extends State<_UltronPanel> {
             duration: const Duration(milliseconds: 160),
             padding: const EdgeInsets.symmetric(vertical: 8),
             decoration: BoxDecoration(
-              color: on ? _red.withOpacity(0.16) : Colors.transparent,
+              color: on ? AppColors.primary : Colors.transparent,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: on ? _red.withOpacity(0.7) : Colors.transparent),
+              border: Border.all(color: on ? AppColors.primary : Colors.transparent),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(icon, size: 15, color: on ? _red : _muted),
+                Icon(icon, size: 15, color: on ? Colors.white : _muted),
                 const SizedBox(width: 6),
                 Text(label, style: TextStyle(color: on ? Colors.white : _muted, fontSize: 12.5, fontWeight: FontWeight.w600)),
               ],
@@ -721,8 +687,8 @@ class _UltronPanelState extends State<_UltronPanel> {
               height: 44,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: const LinearGradient(colors: [_red, _redDeep], begin: Alignment.topLeft, end: Alignment.bottomRight),
-                boxShadow: [BoxShadow(color: _red.withOpacity(0.35), blurRadius: 10)],
+                color: AppColors.primary,
+                boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.35), blurRadius: 10)],
               ),
               child: c.thinking && c.thinkingMode == m
                   ? const Padding(
