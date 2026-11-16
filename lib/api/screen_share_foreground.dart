@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_background/flutter_background.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart' show Helper;
 
 class ScreenShareForeground {
   ScreenShareForeground._();
@@ -10,17 +11,23 @@ class ScreenShareForeground {
 
   static Future<bool> start() async {
     if (!_isAndroid) return true;
-    if (!_initialized) {
-      _initialized = await FlutterBackground.initialize(
-        androidConfig: FlutterBackgroundAndroidConfig(
-          notificationTitle: 'Quorum screen sharing',
-          notificationText: 'You are sharing your screen in a meeting.',
-          notificationImportance: AndroidNotificationImportance.normal,
-        ),
-      );
-      if (!_initialized) return false;
+    try {
+      if (!await Helper.requestCapturePermission()) return false;
+      if (!_initialized) {
+        _initialized = await FlutterBackground.initialize(
+          androidConfig: FlutterBackgroundAndroidConfig(
+            notificationTitle: 'Quorum screen sharing',
+            notificationText: 'You are sharing your screen in a meeting.',
+            notificationImportance: AndroidNotificationImportance.normal,
+          ),
+        );
+        if (!_initialized) return false;
+      }
+      return await FlutterBackground.enableBackgroundExecution();
+    } catch (_) {
+      _initialized = false;
+      return false;
     }
-    return FlutterBackground.enableBackgroundExecution();
   }
 
   static Future<void> stop() async {

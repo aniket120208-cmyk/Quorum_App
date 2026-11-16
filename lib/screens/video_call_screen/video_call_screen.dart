@@ -3,15 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:quorum_app/api/api_exception.dart';
-import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/meeting_api.dart';
-import 'package:quorum_app/api/notification_service.dart';
-import 'package:quorum_app/models/notification_models.dart';
-import 'package:quorum_app/screens/home_screen/calendar_helpers.dart';
 import 'package:quorum_app/models/meeting_models.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
-import 'package:quorum_app/screens/meetings_screen/meetings_list_screen.dart';
-import 'package:quorum_app/screens/meetings_screen/schedule_meeting_sheet.dart';
 import 'package:quorum_app/screens/organization_screen/organization_sheets.dart';
 import 'package:quorum_app/screens/recording_screen/meeting_recordings_screen.dart';
 import 'meeting_launcher.dart';
@@ -27,23 +21,15 @@ class VideoCallScreen extends StatefulWidget {
 class _VideoCallScreenState extends State<VideoCallScreen> {
   final VideoCallController _controller = VideoCallController();
   final TextEditingController _codeCtrl = TextEditingController();
-  StreamSubscription<NotificationItem>? _notificationSub;
 
   @override
   void initState() {
     super.initState();
     _controller.loadHistory();
-    _controller.loadUpcoming();
-    _notificationSub = NotificationService.instance.incoming.listen((item) {
-      if (item.type == NotificationType.eventReminder) {
-        _controller.loadUpcoming();
-      }
-    });
   }
 
   @override
   void dispose() {
-    _notificationSub?.cancel();
     _codeCtrl.dispose();
     _controller.dispose();
     super.dispose();
@@ -74,33 +60,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     _snack('You left the meeting • ${result.formattedDuration}');
   }
 
-  Future<void> _joinScheduled(ScheduledEntry entry) async {
-    final meeting = entry.meeting;
-    if (meeting != null) {
-      final isHost = CurrentUser.isLoaded && meeting.hostId == CurrentUser.id;
-      if (!meeting.canJoin(isHost: isHost)) {
-        _snack('This meeting opens 15 minutes before it starts');
-        return;
-      }
-      await _openRoom(meeting.code, title: meeting.title, isHost: isHost);
-      if (mounted) _controller.loadUpcoming();
-      return;
-    }
-    final event = entry.event;
-    if (event == null) return;
-    final link = event.meetingLink;
-    if (link == null) return;
-    if (MeetingApi.isQuorumLink(link)) {
-      final code = MeetingApi.codeFromLink(link);
-      if (code != null) {
-        await _openRoom(code, title: event.title);
-        return;
-      }
-    }
-    final opened = await MeetingLauncher.join(link, title: event.title);
-    if (!opened) _snack('Unable to open the meeting link');
-  }
-
   void _handleJoin() {
     final input = _codeCtrl.text.trim();
     if (input.isEmpty) return;
@@ -123,67 +82,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     } catch (e) {
       _snack(errorText(e));
     }
-  }
-
-  Future<void> _scheduleMeeting() async {
-    final meeting = await showOrgSheet<ScopedMeeting>(context, const ScheduleMeetingSheet());
-    if (meeting == null || !mounted) return;
-    await _controller.saveScheduled(meeting);
-    unawaited(_controller.loadUpcoming());
-    if (!mounted) return;
-    if (meeting.isActive) {
-      _showLinkDialog(
-        CreatedMeeting(code: meeting.code, link: meeting.link ?? MeetingApi.linkFor(meeting.code)),
-      );
-      return;
-    }
-    _snack('Meeting scheduled');
-  }
-
-  Future<void> _openUpcoming() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const MeetingsListScreen.upcoming()),
-    );
-    if (!mounted) return;
-    _controller.loadUpcoming();
-    _controller.loadHistory();
-  }
-
-  void _openHistory() {
-    _controller.loadHistory();
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => _buildHistoryPage()),
-    );
-  }
-
-  Widget _buildHistoryPage() {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0F101A),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0F101A),
-        elevation: 0,
-        foregroundColor: Colors.white,
-        title: const Text(
-          'Recent meetings',
-          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
-        ),
-      ),
-      body: ListenableBuilder(
-        listenable: _controller,
-        builder: (context, _) {
-          final history = _controller.history;
-          if (history.isEmpty) return _buildEmptyState();
-          return ListView.builder(
-            padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + MediaQuery.of(context).padding.bottom),
-            itemCount: history.length,
-            itemBuilder: (context, i) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _buildHistoryTile(history[i], i),
-            ),
-          );
-        },
-      ),
-    );
   }
 
   void _copyLink(String code) {
@@ -275,14 +173,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           'Meetings',
           style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700),
         ),
-        actions: [
-          IconButton(
-            tooltip: 'History',
-            onPressed: _openHistory,
-            icon: const Icon(Icons.history_rounded, color: Colors.white),
-          ),
-          const SizedBox(width: 8),
-        ],
       ),
       body: SafeArea(
         top: false,
@@ -306,90 +196,22 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                 _buildHeroCard(_controller.creating),
                 const SizedBox(height: 28),
                 const Text(
-                  'Scheduled meetings',
+                  'Recent meetings',
                   style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
-                if (_controller.upcoming.isEmpty)
-                  _buildNoScheduled()
+                if (_controller.history.isEmpty)
+                  _buildEmptyState()
                 else
-                  for (final event in _controller.upcoming)
+                  for (var i = 0; i < _controller.history.length; i++)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 10),
-                      child: _buildScheduledTile(event),
+                      child: _buildHistoryTile(_controller.history[i], i),
                     ),
               ],
             );
           },
         ),
-      ),
-    );
-  }
-
-  String _scheduledWhen(ScheduledEntry entry) {
-    if (entry.meeting?.isActive ?? false) return 'Live now';
-    final start = entry.start;
-    if (start == null) return 'Time not set';
-    final now = DateTime.now();
-    final event = entry.event;
-    final time = event != null
-        ? calendarTimeLabel(context, event)
-        : MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(start));
-    if (calendarSameDay(start, now)) return 'Today, $time';
-    if (calendarSameDay(start, now.add(const Duration(days: 1)))) return 'Tomorrow, $time';
-    return '${start.day}/${start.month}/${start.year}, $time';
-  }
-
-  Widget _buildScheduledTile(ScheduledEntry event) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.surfaceBorder),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(Icons.event_rounded, color: AppColors.primaryLight, size: 22),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  event.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _scheduledWhen(event),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            onPressed: () => _joinScheduled(event),
-            child: const Text('Join', style: TextStyle(color: Colors.white)),
-          ),
-        ],
       ),
     );
   }
@@ -425,54 +247,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
               ),
             ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: loading ? null : _scheduleMeeting,
-                  icon: const Icon(Icons.event_available_rounded, size: 18, color: Colors.white),
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      'Schedule',
-                      maxLines: 1,
-                      softWrap: false,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(46),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    side: const BorderSide(color: AppColors.surfaceBorder),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _openUpcoming,
-                  icon: const Icon(Icons.event_note_rounded, size: 18, color: Colors.white),
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      'Upcoming',
-                      maxLines: 1,
-                      softWrap: false,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(46),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    side: const BorderSide(color: AppColors.surfaceBorder),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                ),
-              ),
-            ],
           ),
           const SizedBox(height: 16),
           const Row(
@@ -538,30 +312,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                 },
               ),
             ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNoScheduled() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.surfaceBorder),
-      ),
-      child: const Column(
-        children: [
-          Icon(Icons.event_busy_rounded, size: 40, color: Colors.white24),
-          SizedBox(height: 10),
-          Text('No scheduled meetings yet', style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w600)),
-          SizedBox(height: 4),
-          Text(
-            'Meetings you schedule will show up here.',
-            style: TextStyle(color: Colors.white30, fontSize: 12),
           ),
         ],
       ),
