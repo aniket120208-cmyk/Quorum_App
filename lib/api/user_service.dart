@@ -91,6 +91,21 @@ class UserService {
     }
   }
 
+  Future<Map<String, dynamic>> removeAvatar() async {
+    try {
+      var r = await _dio.patch('/api/users/profile', data: {'avatar': null});
+      var user = _user(r.data);
+      if (avatarFromJson(user) != null) {
+        r = await _dio.patch('/api/users/profile', data: {'avatar': ''});
+        user = _user(r.data);
+      }
+      CurrentUser.setFromProfile(user);
+      return user;
+    } on DioException catch (e) {
+      throw _toException(e);
+    }
+  }
+
   Future<Map<String, dynamic>> uploadAvatar({
     required String path,
     String? fileName,
