@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/chat_repository.dart';
 import 'package:quorum_app/api/community_repository.dart';
 import 'package:quorum_app/api/current_user.dart';
+import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/api/saved_items_repository.dart';
 import 'package:quorum_app/api/saved_items_store.dart';
 import 'package:quorum_app/models/community_models.dart';
@@ -13,6 +13,7 @@ import 'package:quorum_app/screens/chat_screen/attachment_widgets.dart';
 import 'package:quorum_app/screens/chat_screen/chat_room_screen.dart';
 import 'package:quorum_app/screens/community_screen/communtiy_details_screen.dart';
 import 'package:quorum_app/screens/community_screen/post_comments_screen.dart';
+import 'package:quorum_app/screens/organization_screen/organization_detail_screen.dart';
 import 'package:quorum_app/screens/organization_screen/organization_widgets.dart';
 
 class SavedItemsScreen extends StatefulWidget {
@@ -360,9 +361,9 @@ class _SavedItemsScreenState extends State<SavedItemsScreen> {
           final url = s('fileUrl');
           if (url.isEmpty) return;
           if (s('fileType') == 'image') {
-            await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ImageViewerScreen(url: url)));
+            await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ImageViewerScreen(url: url, fileName: s('fileName'))));
           } else {
-            await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+            await openFilePreview(context, url, s('fileName'));
           }
         case SavedItemType.message:
         case SavedItemType.chat:
@@ -385,6 +386,14 @@ class _SavedItemsScreenState extends State<SavedItemsScreen> {
                 initialMessageId: item.type == SavedItemType.message ? item.itemId : null,
               ),
             ),
+          );
+        case SavedItemType.orgPost:
+          final orgId = s('organizationId');
+          if (orgId.isEmpty) return;
+          final org = await OrganizationRepository.instance.detail(orgId, role: 'MEMBER');
+          if (!mounted) return;
+          await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => OrganizationDetailScreen(organization: org, initialTab: 2)),
           );
         case SavedItemType.document:
         case SavedItemType.resource:
@@ -420,7 +429,7 @@ class _SavedItemsScreenState extends State<SavedItemsScreen> {
               );
             }
           } else if (s('fileUrl').isNotEmpty) {
-            await launchUrl(Uri.parse(s('fileUrl')), mode: LaunchMode.externalApplication);
+            await openFilePreview(context, s('fileUrl'), s('fileName'));
           }
       }
     } catch (e) {
@@ -454,6 +463,8 @@ class _SavedItemsScreenState extends State<SavedItemsScreen> {
         return Icons.description_outlined;
       case SavedItemType.resource:
         return Icons.link_rounded;
+      case SavedItemType.orgPost:
+        return Icons.dynamic_feed_rounded;
     }
   }
 

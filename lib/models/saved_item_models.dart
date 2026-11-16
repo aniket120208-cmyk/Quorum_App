@@ -5,7 +5,8 @@ enum SavedItemType {
   file('FILE', 'Files'),
   chat('CHAT', 'Chats'),
   document('DOCUMENT', 'Documents'),
-  resource('RESOURCE', 'Resources');
+  resource('RESOURCE', 'Resources'),
+  orgPost('ORG_POST', 'Org posts');
 
   const SavedItemType(this.value, this.label);
   final String value;
