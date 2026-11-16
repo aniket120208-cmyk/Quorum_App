@@ -9,6 +9,8 @@ enum NotificationType {
   meetingStarted('MEETING_STARTED', 'Meeting started'),
   directMessage('DIRECT_MESSAGE', 'Direct messages'),
   eventReminder('EVENT_REMINDER', 'Calendar reminders'),
+  orgFeedPost('ORG_FEED_POST', 'Organization feed posts'),
+  orgFeedComment('ORG_FEED_COMMENT', 'Organization feed comments'),
   system('SYSTEM', 'System announcements');
 
   const NotificationType(this.value, this.label);
@@ -19,6 +21,8 @@ enum NotificationType {
     communityJoinRequest,
     communityJoinAccepted,
     communityJoinRejected,
+    orgFeedPost,
+    orgFeedComment,
   ];
 
   static List<NotificationType> get configurable =>

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/notification_repository.dart';
 import 'package:quorum_app/api/notification_router.dart';
@@ -29,6 +30,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
   final List<NotificationItem> _items = [];
   StreamSubscription<NotificationItem>? _sub;
 
+  bool _headerVisible = true;
   bool _unreadOnly = false;
   bool _loading = true;
   bool _loadingMore = false;
@@ -53,6 +55,16 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
   void _onScroll() {
     if (_scroll.position.pixels >= _scroll.position.maxScrollExtent - 240) _loadMore();
+  }
+
+  bool _onScrollDirection(UserScrollNotification n) {
+    if (n.depth != 0) return false;
+    if (n.direction == ScrollDirection.reverse && _headerVisible) {
+      setState(() => _headerVisible = false);
+    } else if (n.direction == ScrollDirection.forward && !_headerVisible) {
+      setState(() => _headerVisible = true);
+    }
+    return false;
   }
 
   void _onIncoming(NotificationItem n) {
@@ -170,28 +182,44 @@ class _NotificationScreenState extends State<NotificationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _bg,
-      appBar: AppBar(
-        backgroundColor: _bg,
-        elevation: 0,
-        foregroundColor: Colors.white,
-        title: const Text('Notifications', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-        actions: [
-          IconButton(
-            tooltip: 'Mark all as read',
-            icon: const Icon(Icons.done_all_rounded),
-            onPressed: _markAll,
-          ),
-          IconButton(
-            tooltip: 'Preferences',
-            icon: const Icon(Icons.tune_rounded),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const NotificationPreferencesScreen()),
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+        children: [
+          ClipRect(
+            child: AnimatedAlign(
+              alignment: Alignment.topCenter,
+              heightFactor: _headerVisible ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOut,
+              child: SizedBox(
+                height: 56,
+                child: Row(
+                  children: [
+                    const BackButton(color: Colors.white),
+                    const Expanded(
+                      child: Text(
+                        'Notifications',
+                        style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Mark all as read',
+                      icon: const Icon(Icons.done_all_rounded, color: Colors.white),
+                      onPressed: _markAll,
+                    ),
+                    IconButton(
+                      tooltip: 'Preferences',
+                      icon: const Icon(Icons.tune_rounded, color: Colors.white),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const NotificationPreferencesScreen()),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
-        ],
-      ),
-      body: Column(
-        children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
             child: Row(
@@ -202,8 +230,14 @@ class _NotificationScreenState extends State<NotificationScreen> {
               ],
             ),
           ),
-          Expanded(child: _body()),
+          Expanded(
+            child: NotificationListener<UserScrollNotification>(
+              onNotification: _onScrollDirection,
+              child: _body(),
+            ),
+          ),
         ],
+        ),
       ),
     );
   }

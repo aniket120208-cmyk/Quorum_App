@@ -61,6 +61,10 @@ IconData notificationIcon(NotificationType t) {
       return Icons.mail_rounded;
     case NotificationType.eventReminder:
       return Icons.event_rounded;
+    case NotificationType.orgFeedPost:
+      return Icons.dynamic_feed_rounded;
+    case NotificationType.orgFeedComment:
+      return Icons.forum_rounded;
     case NotificationType.system:
       return Icons.campaign_rounded;
   }
