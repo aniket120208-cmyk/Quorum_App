@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:quorum_app/models/chat_models.dart';
+import 'package:quorum_app/screens/profile_screen/user_profile_screen.dart';
 import 'chat_widgets.dart';
 import 'voice_widgets.dart';
 
@@ -139,7 +140,16 @@ Future<void> showReactorsSheet(
                       Navigator.pop(ctx);
                       onRemoveMine(emoji);
                     }
-                  : null,
+                  : () {
+                      Navigator.pop(ctx);
+                      openUserProfile(
+                        context,
+                        userId: user.id,
+                        name: user.name,
+                        email: user.email,
+                        avatarUrl: user.avatarUrl,
+                      );
+                    },
               leading: ChatAvatar(name: user.name, imageUrl: user.avatarUrl, radius: 18),
               title: Text(
                 mine ? 'You' : (user.name.isEmpty ? 'Unknown' : user.name),

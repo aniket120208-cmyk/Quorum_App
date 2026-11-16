@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:quorum_app/models/chat_models.dart';
+import 'chat_action_sheets.dart';
 import 'chat_room_screen.dart';
 import 'chat_search_widgets.dart';
 import 'chat_widgets.dart';
 import 'dart:async';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/auth_service.dart';
+import 'package:quorum_app/api/chat_actions.dart';
 import 'package:quorum_app/api/chat_repository.dart';
 import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/socket_service.dart';
@@ -108,6 +110,14 @@ class _ChatScreenState extends State<ChatScreen> {
       _socket.on('conversation:update', _onConversationUpdate);
       _socket.on('message:new', _onNewMessage);
       _socket.on('conversation:removed', _onRemoved);
+      _socket.on('conversation:muted', _onMuted);
+      _socket.on('conversation:unmuted', _onUnmuted);
+      _socket.on('conversation:blocked', _onBlocked);
+      _socket.on('conversation:unblocked', _onUnblocked);
+      _socket.on('conversation:cleared', _onCleared);
+      _socket.on('conversation:deleted', _onRemoved);
+      _socket.on('group:profile_picture_updated', _onGroupPicture);
+      _socket.on('group:profile_picture_deleted', _onGroupPicture);
       _socket.on('connect', _onSocketConnect);
 
       await _loadConversations();
@@ -126,6 +136,14 @@ class _ChatScreenState extends State<ChatScreen> {
     _socket.off('conversation:update', _onConversationUpdate);
     _socket.off('message:new', _onNewMessage);
     _socket.off('conversation:removed', _onRemoved);
+    _socket.off('conversation:muted', _onMuted);
+    _socket.off('conversation:unmuted', _onUnmuted);
+    _socket.off('conversation:blocked', _onBlocked);
+    _socket.off('conversation:unblocked', _onUnblocked);
+    _socket.off('conversation:cleared', _onCleared);
+    _socket.off('conversation:deleted', _onRemoved);
+    _socket.off('group:profile_picture_updated', _onGroupPicture);
+    _socket.off('group:profile_picture_deleted', _onGroupPicture);
     _socket.off('connect', _onSocketConnect);
     super.dispose();
   }
@@ -192,11 +210,107 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  void _onGroupPicture(dynamic data) {
+    final j = asMap(data);
+    if (j == null || !mounted) return;
+    final id = (j['conversationId'] ?? j['groupId'] ?? '').toString();
+    final i = _conversations.indexWhere((c) => c.id == id);
+    if (i == -1) return;
+    final url = j['avatarUrl']?.toString();
+    final cleared = url == null || url.isEmpty;
+    setState(() {
+      _conversations[i] = _conversations[i].copyWith(avatar: cleared ? null : url, clearAvatar: cleared);
+    });
+  }
+
   void _onRemoved(dynamic data) {
     final j = asMap(data);
     if (j == null || !mounted) return;
     final id = (j['conversationId'] ?? '').toString();
     setState(() => _conversations.removeWhere((c) => c.id == id));
+  }
+
+  void _patch(dynamic data, Conversation Function(Conversation c, Map<String, dynamic> j) change) {
+    final j = asMap(data);
+    if (j == null || !mounted) return;
+    final id = (j['conversationId'] ?? j['id'] ?? '').toString();
+    final i = _conversations.indexWhere((c) => c.id == id);
+    if (i == -1) return;
+    setState(() => _conversations[i] = change(_conversations[i], j));
+  }
+
+  void _onMuted(dynamic data) => _patch(
+        data,
+        (c, j) => c.copyWith(
+          isMuted: true,
+          mutedUntil: DateTime.tryParse((j['mutedUntil'] ?? '').toString())?.toLocal(),
+        ),
+      );
+
+  void _onUnmuted(dynamic data) => _patch(data, (c, _) => c.copyWith(isMuted: false));
+  void _onBlocked(dynamic data) => _patch(data, (c, _) => c.copyWith(isBlocked: true));
+  void _onUnblocked(dynamic data) => _patch(data, (c, _) => c.copyWith(isBlocked: false));
+  void _onCleared(dynamic data) =>
+      _patch(data, (c, _) => c.copyWith(clearLastMessage: true, unreadCount: 0));
+
+  Future<void> _showConversationActions(Conversation conversation) async {
+    final title = conversation.titleFor(_currentUserId);
+    final action = await showChatActionsSheet(context, conversation, title);
+    if (action == null || !mounted) return;
+    final actions = ChatActions.instance;
+    final id = conversation.id;
+    try {
+      switch (action) {
+        case ChatMenuAction.mute:
+          final seconds = await pickMuteDuration(context);
+          if (seconds == null || !mounted) return;
+          final until = await actions.mute(id, durationSeconds: seconds);
+          _patch({'conversationId': id}, (c, _) => c.copyWith(isMuted: true, mutedUntil: until));
+          if (mounted) showInfoSnack(context, 'Notifications muted');
+        case ChatMenuAction.unmute:
+          await actions.unmute(id);
+          _patch({'conversationId': id}, (c, _) => c.copyWith(isMuted: false));
+          if (mounted) showInfoSnack(context, 'Notifications turned on');
+        case ChatMenuAction.clear:
+          final ok = await confirmChatAction(
+            context,
+            title: 'Clear chat?',
+            body: 'All messages will be removed from your view. Other people keep their copy.',
+            action: 'Clear',
+          );
+          if (!ok || !mounted) return;
+          await actions.clear(id);
+          _patch({'conversationId': id}, (c, _) => c.copyWith(clearLastMessage: true, unreadCount: 0));
+          if (mounted) showInfoSnack(context, 'Chat cleared');
+        case ChatMenuAction.block:
+          final ok = await confirmChatAction(
+            context,
+            title: 'Block $title?',
+            body: 'Neither of you will be able to send messages in this chat until you unblock.',
+            action: 'Block',
+          );
+          if (!ok || !mounted) return;
+          await actions.block(id);
+          _patch({'conversationId': id}, (c, _) => c.copyWith(isBlocked: true));
+          if (mounted) showInfoSnack(context, 'Chat blocked');
+        case ChatMenuAction.unblock:
+          await actions.unblock(id);
+          _patch({'conversationId': id}, (c, _) => c.copyWith(isBlocked: false));
+          if (mounted) showInfoSnack(context, 'Chat unblocked');
+        case ChatMenuAction.delete:
+          final ok = await confirmChatAction(
+            context,
+            title: 'Delete chat?',
+            body: 'This removes the conversation and its history from your inbox.',
+            action: 'Delete',
+          );
+          if (!ok || !mounted) return;
+          await actions.deleteConversation(id);
+          if (mounted) setState(() => _conversations.removeWhere((c) => c.id == id));
+      }
+    } catch (e) {
+      if (mounted) showErrorSnack(context, errorText(e));
+    }
   }
 
   Future<void> _openChatRoom(Conversation conversation, {String? messageId, String? searchQuery}) async {
@@ -327,6 +441,7 @@ class _ChatScreenState extends State<ChatScreen> {
       },
       onRefresh: () => _loadConversations(silent: true),
       onConversationTap: _openChatRoom,
+      onConversationLongPress: _showConversationActions,
       onMessageTap: (c, m) => _openChatRoom(c, messageId: m.id),
       onOpenInChat: (c, q) => _openChatRoom(c, searchQuery: q),
       onNewChatTap: _newChat,
@@ -343,6 +458,7 @@ class ChatListView extends StatefulWidget {
     required this.onConversationTap,
     required this.onNewChatTap,
     required this.onNewGroupTap,
+    this.onConversationLongPress,
     this.isLoading = false,
     this.errorMessage,
     this.onRetry,
@@ -354,6 +470,7 @@ class ChatListView extends StatefulWidget {
   final List<Conversation> conversations;
   final String currentUserId;
   final ValueChanged<Conversation> onConversationTap;
+  final ValueChanged<Conversation>? onConversationLongPress;
   final void Function(Conversation conversation, ChatMessage message)? onMessageTap;
   final void Function(Conversation conversation, String query)? onOpenInChat;
   final VoidCallback onNewChatTap;
@@ -468,114 +585,141 @@ class _ChatListViewState extends State<ChatListView> {
   }
 
   Widget _scaffold() {
+    final media = MediaQuery.of(context);
+    final fabLift = (media.padding.bottom - 20 - media.viewPadding.bottom)
+        .clamp(0.0, double.infinity);
     return Scaffold(
       backgroundColor: const Color(0xFF0F101A),
-      appBar: _searching
-          ? _searchBar()
-          : AppBar(
-              backgroundColor: const Color(0xFF0F101A),
-              elevation: 0,
-              title: const Text(
-                'Chat',
-                style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              actions: [
-                IconButton(
-                  tooltip: 'Search',
-                  icon: const Icon(Icons.search_rounded, color: AppColors.textPrimary),
-                  onPressed: _openSearch,
-                ),
-                IconButton(
-                  tooltip: 'New group',
-                  icon: const Icon(Icons.group_add_outlined, color: AppColors.textPrimary),
-                  onPressed: widget.onNewGroupTap,
-                ),
-              ],
-            ),
+      appBar: _searching ? _searchBar() : null,
       floatingActionButton: _searching
           ? null
-          : FloatingActionButton(
-              backgroundColor: AppColors.primary,
-              foregroundColor: AppColors.textPrimary,
-              tooltip: 'New chat',
-              onPressed: widget.onNewChatTap,
-              child: const Icon(Icons.edit_outlined),
+          : Padding(
+              padding: EdgeInsets.only(bottom: fabLift),
+              child: FloatingActionButton(
+                backgroundColor: AppColors.primary,
+                foregroundColor: AppColors.textPrimary,
+                tooltip: 'New chat',
+                onPressed: widget.onNewChatTap,
+                child: const Icon(Icons.edit_outlined),
+              ),
             ),
-      body: _searching ? _searchBody() : Builder(
-        builder: (context) {
-          if (widget.isLoading) {
-            return const Center(
-              child: CircularProgressIndicator(color: AppColors.primary),
-            );
-          }
-
-          if (widget.errorMessage != null) {
-            return MessagePlaceholder(
-              icon: Icons.cloud_off,
-              text: widget.errorMessage!,
-              actionLabel: 'Retry',
-              onAction: widget.onRetry ?? () {},
-            );
-          }
-
-          if (widget.conversations.isEmpty) {
-            return MessagePlaceholder(
-              icon: Icons.chat_bubble_outline,
-              text: ChatFilter.all.emptyText,
-              actionLabel: 'New chat',
-              onAction: widget.onNewChatTap,
-            );
-          }
-
-          final unreadChats = widget.conversations.where((c) => c.unreadCount > 0).length;
-          final visible = widget.conversations.where(_filter.matches).toList(growable: false);
-
-          return Column(
-            children: [
-              FilterBar(
-                selected: _filter,
-                unreadChats: unreadChats,
-                onSelected: (f) => setState(() => _filter = f),
-              ),
-              Expanded(
-                child: visible.isEmpty
-                    ? MessagePlaceholder(
-                        icon: _filter.emptyIcon,
-                        text: _filter.emptyText,
-                        actionLabel: 'Show all chats',
-                        onAction: () => setState(() => _filter = ChatFilter.all),
-                      )
-                    : RefreshIndicator(
-                        color: AppColors.primary,
-                        backgroundColor: AppColors.surface,
-                        onRefresh: widget.onRefresh ?? () async {},
-                        child: ListView.separated(
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          padding: const EdgeInsets.only(bottom: 88),
-                          itemCount: visible.length,
-                          separatorBuilder: (_, _) => const Divider(
-                            height: 1,
-                            indent: 76,
-                            color: AppColors.surfaceBorder,
-                          ),
-                          itemBuilder: (context, i) {
-                            final conversation = visible[i];
-                            return ConversationTile(
-                              conversation: conversation,
-                              currentUserId: widget.currentUserId,
-                              onTap: () => widget.onConversationTap(conversation),
-                            );
-                          },
-                        ),
+      body: _searching
+          ? _searchBody()
+          : SafeArea(
+              bottom: false,
+              child: NestedScrollView(
+                floatHeaderSlivers: true,
+                headerSliverBuilder: (context, innerBoxIsScrolled) => [
+                  SliverAppBar(
+                    primary: false,
+                    floating: true,
+                    snap: true,
+                    backgroundColor: const Color(0xFF0F101A),
+                    elevation: 0,
+                    title: const Text(
+                      'Chat',
+                      style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
                       ),
+                    ),
+                    actions: [
+                      IconButton(
+                        tooltip: 'Search',
+                        icon: const Icon(Icons.search_rounded, color: AppColors.textPrimary),
+                        onPressed: _openSearch,
+                      ),
+                      IconButton(
+                        tooltip: 'New group',
+                        icon: const Icon(Icons.group_add_outlined, color: AppColors.textPrimary),
+                        onPressed: widget.onNewGroupTap,
+                      ),
+                    ],
+                  ),
+                ],
+                body: Builder(
+                  builder: (context) {
+                    if (widget.isLoading) {
+                      return const Center(
+                        child: CircularProgressIndicator(color: AppColors.primary),
+                      );
+                    }
+
+                    if (widget.errorMessage != null) {
+                      return MessagePlaceholder(
+                        icon: Icons.cloud_off,
+                        text: widget.errorMessage!,
+                        actionLabel: 'Retry',
+                        onAction: widget.onRetry ?? () {},
+                      );
+                    }
+
+                    if (widget.conversations.isEmpty) {
+                      return MessagePlaceholder(
+                        icon: Icons.chat_bubble_outline,
+                        text: ChatFilter.all.emptyText,
+                        actionLabel: 'New chat',
+                        onAction: widget.onNewChatTap,
+                      );
+                    }
+
+                    final unreadChats = widget.conversations.where((c) => c.unreadCount > 0).length;
+                    final visible = widget.conversations.where(_filter.matches).toList(growable: false);
+
+                    return Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: FilterBar(
+                            selected: _filter,
+                            unreadChats: unreadChats,
+                            onSelected: (f) => setState(() => _filter = f),
+                          ),
+                        ),
+                        Expanded(
+                          child: visible.isEmpty
+                              ? MessagePlaceholder(
+                                  icon: _filter.emptyIcon,
+                                  text: _filter.emptyText,
+                                  actionLabel: 'Show all chats',
+                                  onAction: () => setState(() => _filter = ChatFilter.all),
+                                )
+                              : RefreshIndicator(
+                                  color: AppColors.primary,
+                                  backgroundColor: AppColors.surface,
+                                  onRefresh: widget.onRefresh ?? () async {},
+                                  child: ListView.separated(
+                                    physics: const AlwaysScrollableScrollPhysics(),
+                                    padding: EdgeInsets.only(
+                                      bottom: 88 + MediaQuery.of(context).padding.bottom - 20,
+                                    ),
+                                    itemCount: visible.length,
+                                    separatorBuilder: (_, _) => const Divider(
+                                      height: 1,
+                                      indent: 76,
+                                      color: AppColors.surfaceBorder,
+                                    ),
+                                    itemBuilder: (context, i) {
+                                      final conversation = visible[i];
+                                      return ConversationTile(
+                                        conversation: conversation,
+                                        currentUserId: widget.currentUserId,
+                                        onTap: () => widget.onConversationTap(conversation),
+                                        onLongPress: widget.onConversationLongPress == null
+                                            ? null
+                                            : () => widget.onConversationLongPress!(conversation),
+                                      );
+                                    },
+                                  ),
+                                ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
               ),
-            ],
-          );
-        },
-      ),
+            ),
     );
   }
 }
@@ -667,11 +811,13 @@ class ConversationTile extends StatelessWidget {
     required this.conversation,
     required this.currentUserId,
     required this.onTap,
+    this.onLongPress,
   });
 
   final Conversation conversation;
   final String currentUserId;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -690,22 +836,36 @@ class ConversationTile extends StatelessWidget {
       preview = '$prefix${last.previewText}';
     }
 
+    final muted = conversation.muted;
     return ListTile(
       onTap: onTap,
+      onLongPress: onLongPress,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       leading: ChatAvatar(
         name: title,
         isGroup: conversation.isGroup,
         imageUrl: conversation.isGroup ? conversation.avatar : conversation.directAvatar,
+        userId: conversation.directUserIdFor(currentUserId),
       ),
-      title: Text(
-        title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          color: AppColors.textPrimary,
-          fontWeight: FontWeight.w600,
-        ),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (conversation.isBlocked && !conversation.isGroup)
+            const Padding(
+              padding: EdgeInsets.only(left: 6),
+              child: Icon(Icons.block_rounded, size: 14, color: AppColors.textSecondary),
+            ),
+        ],
       ),
       subtitle: Text(
         preview,
@@ -726,12 +886,15 @@ class ConversationTile extends StatelessWidget {
               fontSize: 12,
             ),
           ),
-          if (unread > 0) ...[
+          if (unread > 0 || muted) ...[
             const SizedBox(height: 6),
+            if (unread == 0)
+              const Icon(Icons.notifications_off_outlined, size: 16, color: AppColors.textSecondary)
+            else
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
-                color: AppColors.primary,
+                color: muted ? AppColors.textMuted : AppColors.primary,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(

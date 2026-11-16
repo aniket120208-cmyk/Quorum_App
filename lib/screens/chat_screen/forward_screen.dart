@@ -168,6 +168,7 @@ class _ForwardScreenState extends State<ForwardScreen> {
             isGroup: c.isGroup,
             imageUrl: c.isGroup ? c.avatar : null,
             radius: 20,
+            userId: c.directUserIdFor(widget.currentUserId),
           ),
           title: Text(
             title,

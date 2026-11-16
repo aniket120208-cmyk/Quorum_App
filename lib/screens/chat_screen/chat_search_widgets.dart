@@ -175,6 +175,7 @@ class MessageSearchController extends ChangeNotifier {
 
   final String conversationId;
   final List<ChatMessage> Function() localMessages;
+
   final ChatRepository _repo = ChatRepository.instance;
 
   String query = '';
@@ -184,6 +185,7 @@ class MessageSearchController extends ChangeNotifier {
   bool loading = false;
   bool loadingMore = false;
   bool localOnly = false;
+
   Timer? _debounce;
   int _token = 0;
   bool _disposed = false;
@@ -416,12 +418,14 @@ class _ChatSearchViewState extends State<ChatSearchView> {
   static const int _maxChats = 60;
   static const int _workers = 6;
   static const int _perChat = 3;
+
   final ChatRepository _repo = ChatRepository.instance;
   Timer? _debounce;
   int _token = 0;
   List<_ConversationHits> _hits = [];
   bool _searching = false;
   bool _allFailed = false;
+
   String get _q => widget.query.trim();
 
   @override

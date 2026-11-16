@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/presence_widgets.dart';
 
 class AppColors {
   AppColors._();
@@ -63,15 +64,23 @@ class ChatAvatar extends StatelessWidget {
     this.isGroup = false,
     this.imageUrl,
     this.radius = 24,
+    this.userId,
   });
 
   final String name;
   final bool isGroup;
   final String? imageUrl;
   final double radius;
+  final String? userId;
 
   @override
   Widget build(BuildContext context) {
+    final id = userId;
+    if (id == null || id.isEmpty || isGroup) return _avatar();
+    return PresenceWrap(userId: id, avatarSize: radius * 2, ringColor: const Color(0xFF0F101A), child: _avatar());
+  }
+
+  Widget _avatar() {
     if (imageUrl != null && imageUrl!.isNotEmpty) {
       return CircleAvatar(
         radius: radius,
@@ -92,7 +101,7 @@ class ChatAvatar extends StatelessWidget {
       );
     }
 
-    final initial = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?';
+    final initial = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '';
     return CircleAvatar(
       radius: radius,
       backgroundColor: AppColors.surfaceBorder,

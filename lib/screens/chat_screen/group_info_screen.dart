@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/chat_repository.dart';
-import 'package:quorum_app/api/upload_service.dart';
+import 'package:quorum_app/api/profile_picture_repository.dart';
+import 'package:quorum_app/api/socket_service.dart';
 import 'package:quorum_app/models/chat_models.dart';
 import 'chat_widgets.dart';
+import 'package:quorum_app/widgets/presence_widgets.dart';
 import 'user_picker_screen.dart';
+import 'package:quorum_app/screens/profile_screen/user_profile_screen.dart';
 
 class GroupInfoResult {
   final Conversation? conversation;
@@ -38,11 +41,32 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   String get _me => widget.currentUserId;
   bool get _canManage => _conv.adminId == null || _conv.adminId == _me;
 
+  final _socket = SocketService.instance;
+
   @override
   void initState() {
     super.initState();
     _conv = widget.conversation;
+    _socket.on('group:profile_picture_updated', _onGroupPicture);
+    _socket.on('group:profile_picture_deleted', _onGroupPicture);
     _reload();
+  }
+
+  @override
+  void dispose() {
+    _socket.off('group:profile_picture_updated', _onGroupPicture);
+    _socket.off('group:profile_picture_deleted', _onGroupPicture);
+    super.dispose();
+  }
+
+  void _onGroupPicture(dynamic data) {
+    final j = asMap(data);
+    if (j == null || !mounted) return;
+    final id = (j['conversationId'] ?? j['groupId'] ?? '').toString();
+    if (id != _conv.id) return;
+    final url = j['avatarUrl']?.toString();
+    final cleared = url == null || url.isEmpty;
+    setState(() => _conv = _conv.copyWith(avatar: cleared ? null : url, clearAvatar: cleared));
   }
 
   Future<void> _reload() async {
@@ -132,18 +156,20 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     if (choice == null) return;
 
     if (choice == 'remove') {
-      await _run(() => _repo.updateGroup(_conv.id, clearAvatar: true));
+      await _run(() => ProfilePictureRepository.instance
+          .remove(ProfilePictureTarget.group, _conv.id));
       return;
     }
 
     final picked = await ImagePicker()
         .pickImage(source: ImageSource.gallery, imageQuality: 85);
     if (picked == null) return;
-    await _run(() async {
-      final res = await UploadService.instance
-          .upload(path: picked.path, fileName: picked.name);
-      await _repo.updateGroup(_conv.id, avatar: res.url);
-    });
+    await _run(() => ProfilePictureRepository.instance.uploadFile(
+          ProfilePictureTarget.group,
+          _conv.id,
+          path: picked.path,
+          fileName: picked.name,
+        ));
   }
 
   Future<void> _addMembers() async {
@@ -224,15 +250,23 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     }
 
     return ListTile(
-      leading: ChatAvatar(name: u.name, imageUrl: u.avatarUrl, radius: 20),
+      onTap: () => openUserProfile(
+        context,
+        userId: u.id,
+        name: u.name,
+        email: u.email,
+        avatarUrl: u.avatarUrl,
+        role: isAdminRow ? 'Admin' : 'Member',
+        roleLabel: 'Group role',
+      ),
+      leading: ChatAvatar(name: u.name, imageUrl: u.avatarUrl, radius: 20, userId: u.id),
       title: Text(isMe ? '${u.name} (You)' : u.name,
           style: const TextStyle(color: AppColors.textPrimary)),
-      subtitle: (email != null && email.isNotEmpty)
-          ? Text(email,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: AppColors.textSecondary, fontSize: 12))
-          : null,
+      subtitle: PresenceLine(
+        userId: u.id,
+        ringColor: AppColors.surface,
+        style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+      ),
       trailing: trailing,
     );
   }
@@ -293,7 +327,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   children: [
                     Flexible(
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        padding: EdgeInsets.only(left: 16, right: _canManage ? 0 : 16),
                         child: Text(
                           title,
                           textAlign: TextAlign.center,
@@ -307,6 +341,9 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     if (_canManage)
                       IconButton(
                         onPressed: _rename,
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                         icon: const Icon(Icons.edit_outlined, color: AppColors.textSecondary, size: 20),
                       ),
                   ],

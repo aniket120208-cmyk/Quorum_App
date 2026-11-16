@@ -51,7 +51,7 @@ class MentionSuggestionList extends StatelessWidget {
           final email = u.email;
           return ListTile(
             dense: true,
-            leading: ChatAvatar(name: u.name, imageUrl: u.avatarUrl, radius: 15),
+            leading: ChatAvatar(name: u.name, imageUrl: u.avatarUrl, radius: 15, userId: u.id),
             title: Text(
               u.name,
               maxLines: 1,

@@ -187,13 +187,51 @@ class ChatRepository {
         return MessageReactionGroup.listFrom(d is Map ? d['reactions'] : null);
       });
 
-  Future<Poll?> votePoll(String convId, String pollId, List<String> optionIds) =>
+  Future<Poll?> votePoll(String convId, String messageId, List<String> optionIds) =>
       _guard(() async {
         final r = await api.dio.post(
-          '/api/conversations/$convId/polls/$pollId/vote',
+          '/api/conversations/$convId/messages/$messageId/poll/vote',
           data: {'optionIds': optionIds},
         );
         return Poll.tryParse(r.data['data']);
+      });
+
+  Future<Conversation?> conversationDetail(String id, String myId) => _guard(() async {
+        final r = await api.dio.get('/api/conversations/$id');
+        final d = r.data is Map ? r.data['data'] : null;
+        final raw = d is Map && d['conversation'] is Map ? d['conversation'] : d;
+        if (raw is! Map) return null;
+        return Conversation.fromJson(Map<String, dynamic>.from(raw), myId);
+      });
+
+  Future<DateTime?> muteConversation(String convId, {int? durationSeconds}) => _guard(() async {
+        final r = await api.dio.post(
+          '/api/conversations/$convId/mute',
+          data: {if (durationSeconds != null && durationSeconds > 0) 'duration': durationSeconds},
+        );
+        final d = r.data is Map ? r.data['data'] : null;
+        if (d is! Map) return null;
+        return DateTime.tryParse((d['mutedUntil'] ?? '').toString())?.toLocal();
+      });
+
+  Future<void> unmuteConversation(String convId) => _guard(() async {
+        await api.dio.post('/api/conversations/$convId/unmute');
+      });
+
+  Future<void> blockConversation(String convId) => _guard(() async {
+        await api.dio.post('/api/conversations/$convId/block');
+      });
+
+  Future<void> unblockConversation(String convId) => _guard(() async {
+        await api.dio.post('/api/conversations/$convId/unblock');
+      });
+
+  Future<void> clearConversation(String convId) => _guard(() async {
+        await api.dio.post('/api/conversations/$convId/clear');
+      });
+
+  Future<void> deleteConversation(String convId) => _guard(() async {
+        await api.dio.delete('/api/conversations/$convId');
       });
 
   Future<void> forwardMessages(List<String> messageIds, List<String> targetConversationIds) =>

@@ -155,7 +155,7 @@ class _UserPickerScreenState extends State<UserPickerScreen> {
                 return ListTile(
                   onTap: () => _tap(u),
                   leading: ChatAvatar(
-                      name: u.name, imageUrl: u.avatarUrl, radius: 20),
+                      name: u.name, imageUrl: u.avatarUrl, radius: 20, userId: u.id),
                   title: Text(u.name, style: const TextStyle(color: AppColors.textPrimary)),
                   subtitle: (email != null && email.isNotEmpty)
                       ? Text(email,
