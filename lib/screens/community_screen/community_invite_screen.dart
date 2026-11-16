@@ -182,7 +182,7 @@ class _CommunityInviteScreenState extends State<CommunityInviteScreen> {
                     )
                   : const Icon(Icons.link, size: 18),
               label: Text(link == null ? 'Generate link' : 'Generate new link'),
-              style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
             ),
           ),
           if (link != null) ...[

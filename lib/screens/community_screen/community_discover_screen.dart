@@ -5,6 +5,7 @@ import 'package:quorum_app/api/community_repository.dart';
 import 'package:quorum_app/models/community_models.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
 import 'package:quorum_app/screens/community_screen/communtiy_details_screen.dart';
+import 'package:quorum_app/widgets/card_shade.dart';
 import 'package:quorum_app/widgets/swipe_card_deck.dart';
 import 'community_widgets.dart';
 import 'my_join_requests_screen.dart';
@@ -43,7 +44,7 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
   final Set<String> _skipped = {};
   final Map<String, String> _deckRequests = {};
   final _deckKey = GlobalKey<SwipeCardDeckState<DiscoveredCommunity>>();
-  bool _swipeMode = true;
+  bool _showJoined = false;
 
   @override
   void initState() {
@@ -419,97 +420,172 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
     );
   }
 
-  Widget _deckFace(DiscoveredCommunity c) {
+  Widget _glowAvatar(DiscoveredCommunity c) {
+    final icon = c.icon;
+    final initial = c.name.trim().isNotEmpty ? c.name.trim()[0].toUpperCase() : '?';
+    Widget letter() => Container(
+          alignment: Alignment.center,
+          color: const Color(0xFF0E0E24),
+          child: Text(
+            initial,
+            style: const TextStyle(color: Colors.white, fontSize: 46, fontWeight: FontWeight.w800),
+          ),
+        );
+    return Container(
+      width: 112,
+      height: 112,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: const Color(0xFF14142E),
+        border: Border.all(color: violet.withValues(alpha: 0.45), width: 1.5),
+        boxShadow: [BoxShadow(color: violet.withValues(alpha: 0.35), blurRadius: 28, spreadRadius: 2)],
+      ),
+      child: ClipOval(
+        child: icon == null
+            ? letter()
+            : Image.network(icon, fit: BoxFit.cover, errorBuilder: (_, _, _) => letter()),
+      ),
+    );
+  }
+
+  Widget _orb(double size, List<Color> colors) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(colors: colors, begin: Alignment.topCenter, end: Alignment.bottomCenter),
+      ),
+    );
+  }
+
+  Widget _deckInfo(IconData icon, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 18, color: const Color(0xFF6C5CF5)),
+        const SizedBox(width: 7),
+        Text(text, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+      ],
+    );
+  }
+
+  Widget _deckFace(DiscoveredCommunity c, double depth) {
     final description = c.description;
     final hasDesc = description != null && description.isNotEmpty;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: cardBorder),
-        gradient: const LinearGradient(
-          colors: [Color(0xFF2A2563), Color(0xFF161733)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+    final base = cardShade(depth);
+    final tint = Color.lerp(base, const Color(0xFF5B4BF0), (0.65 - depth * 0.2).clamp(0.1, 0.65))!;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(28),
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: base,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: Color.lerp(base, Colors.white, 0.12)!),
         ),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 18, offset: const Offset(0, 8)),
-        ],
-      ),
-      child: ClipRect(
-        child: SingleChildScrollView(
-          physics: const NeverScrollableScrollPhysics(),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const SizedBox(height: 18),
-              _avatar(c, 96),
-              const SizedBox(height: 18),
-              Text(
-                c.name,
-                maxLines: 2,
-                textAlign: TextAlign.center,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 14,
-                runSpacing: 6,
-                children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.groups, size: 16, color: violetLight),
-                      const SizedBox(width: 5),
+        child: Stack(
+          children: [
+            Positioned(
+              top: -210,
+              right: -120,
+              child: _orb(380, [tint, base]),
+            ),
+            Positioned(
+              bottom: -230,
+              left: -80,
+              child: _orb(340, [base, tint]),
+            ),
+            Positioned.fill(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _glowAvatar(c),
+                    const SizedBox(height: 26),
+                    Text(
+                      c.name,
+                      maxLines: 3,
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w800, height: 1.15),
+                    ),
+                    const SizedBox(height: 18),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 32,
+                      runSpacing: 8,
+                      children: [
+                        _deckInfo(Icons.groups_rounded, c.memberCount == 1 ? '1 Member' : '${c.memberCount} Members'),
+                        _deckInfo(Icons.lock_rounded, 'Private'),
+                      ],
+                    ),
+                    if (hasDesc) ...[
+                      const SizedBox(height: 16),
                       Text(
-                        c.memberCount == 1 ? '1 member' : '${c.memberCount} members',
-                        style: const TextStyle(color: muted, fontSize: 13),
+                        description,
+                        maxLines: 2,
+                        textAlign: TextAlign.center,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Color(0xFFB9BBD8), fontSize: 13.5, height: 1.4),
                       ),
                     ],
-                  ),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.tag, size: 16, color: muted),
-                      const SizedBox(width: 3),
-                      Text(
-                        c.channelCount == 1 ? '1 channel' : '${c.channelCount} channels',
-                        style: const TextStyle(color: muted, fontSize: 13),
-                      ),
-                    ],
-                  ),
-                ],
+                  ],
+                ),
               ),
-              const SizedBox(height: 18),
-              Text(
-                hasDesc ? description : 'No description yet',
+            ),
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 30,
+              child: Text(
+                'Swipe to join or remove',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Color(0xFFD0D2E4), fontSize: 15, height: 1.45),
+                style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _roundButton(IconData icon, Color color, VoidCallback onTap, double size) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: cardBg,
-          border: Border.all(color: color, width: 2),
-          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.25), blurRadius: 14)],
+  Widget _tabs() {
+    Widget pill(String label, bool selected, VoidCallback onTap) {
+      return Padding(
+        padding: const EdgeInsets.only(right: 10),
+        child: GestureDetector(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+            decoration: BoxDecoration(
+              color: selected ? const Color(0xFF5B4BF0) : cardBg,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: selected ? const Color(0xFF7A6CF7) : cardBorder, width: 1.2),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: selected ? Colors.white : const Color(0xFFB4B6D0),
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
         ),
-        child: Icon(icon, color: color, size: size * 0.46),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+      child: Row(
+        children: [
+          pill('Explore', !_showJoined, () => setState(() => _showJoined = false)),
+          pill('Joined', _showJoined, () => setState(() => _showJoined = true)),
+        ],
       ),
     );
   }
@@ -551,8 +627,8 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
                   child: const Text('Show skipped again'),
                 ),
               TextButton(
-                onPressed: () => setState(() => _swipeMode = false),
-                child: const Text('Browse as list', style: TextStyle(color: violetLight)),
+                onPressed: () => setState(() => _showJoined = true),
+                child: const Text('View joined communities', style: TextStyle(color: violetLight)),
               ),
             ],
           ),
@@ -562,36 +638,19 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxHeight < 140) return const SizedBox.shrink();
-        return Column(
-          children: [
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-                child: SwipeCardDeck<DiscoveredCommunity>(
-                  key: _deckKey,
-                  items: items,
-                  rightLabel: 'JOIN',
-                  leftLabel: 'SKIP',
-                  rightColor: green,
-                  leftColor: const Color(0xFFEF4444),
-                  itemBuilder: (_, c) => _deckFace(c),
-                  onSwipe: _deckSwipe,
-                  onSwiped: _deckSwiped,
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 20),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _roundButton(Icons.close_rounded, const Color(0xFFEF4444), () => _deckKey.currentState?.swipe(SwipeDirection.left), 58),
-                  const SizedBox(width: 28),
-                  _roundButton(Icons.favorite_rounded, green, () => _deckKey.currentState?.swipe(SwipeDirection.right), 58),
-                ],
-              ),
-            ),
-          ],
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 40, 20, 24),
+          child: SwipeCardDeck<DiscoveredCommunity>(
+            key: _deckKey,
+            items: items,
+            rightLabel: 'JOIN',
+            leftLabel: 'SKIP',
+            rightColor: green,
+            leftColor: const Color(0xFFEF4444),
+            itemBuilder: (_, c, depth) => _deckFace(c, depth),
+            onSwipe: _deckSwipe,
+            onSwiped: _deckSwiped,
+          ),
         );
       },
     );
@@ -609,17 +668,20 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
         onAction: _load,
       );
     }
-    if (_items.isEmpty) {
+    final joined = _items.where((c) => c.status.isJoined).toList();
+    if (_items.isEmpty || joined.isEmpty) {
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
           SizedBox(
             height: 320,
             child: CenteredMessage(
-              icon: Icons.search_off,
-              text: _query.isEmpty
-                  ? 'No public communities to show yet.'
-                  : 'No communities match "$_query".',
+              icon: _items.isEmpty && _query.isNotEmpty ? Icons.search_off : Icons.groups_outlined,
+              text: _query.isNotEmpty
+                  ? 'No communities match "$_query".'
+                  : _showJoined
+                      ? "You haven't joined any communities yet."
+                      : 'No public communities to show yet.',
             ),
           ),
         ],
@@ -629,9 +691,9 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
       controller: _scroll,
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.only(top: 4, bottom: 24),
-      itemCount: _items.length + (_loadingMore ? 1 : 0),
+      itemCount: joined.length + (_loadingMore ? 1 : 0),
       itemBuilder: (_, i) {
-        if (i >= _items.length) {
+        if (i >= joined.length) {
           return const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
             child: Center(
@@ -643,7 +705,7 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
             ),
           );
         }
-        return _card(_items[i]);
+        return _card(joined[i]);
       },
     );
   }
@@ -663,15 +725,6 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
         ),
         actions: [
           IconButton(
-            tooltip: _swipeMode ? 'List view' : 'Swipe view',
-            onPressed: () => setState(() => _swipeMode = !_swipeMode),
-            icon: Icon(
-              _swipeMode ? Icons.view_agenda_outlined : Icons.style_outlined,
-              color: violetLight,
-              size: 22,
-            ),
-          ),
-          IconButton(
             tooltip: 'My requests',
             onPressed: _openMyRequests,
             icon: const Icon(Icons.hourglass_top_rounded, color: violetLight, size: 22),
@@ -681,8 +734,9 @@ class _CommunityDiscoverScreenState extends State<CommunityDiscoverScreen> {
       body: Column(
         children: [
           _searchField(),
+          _tabs(),
           Expanded(
-            child: _swipeMode && !_loading && _error == null && _items.isNotEmpty
+            child: !_showJoined && !_loading && _error == null && _items.isNotEmpty
                 ? _deckView()
                 : RefreshIndicator(
                     color: violet,

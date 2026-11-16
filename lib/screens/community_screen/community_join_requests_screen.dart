@@ -3,6 +3,7 @@ import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/community_repository.dart';
 import 'package:quorum_app/models/community_models.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
+import 'package:quorum_app/screens/profile_screen/user_profile_screen.dart';
 import 'community_widgets.dart';
 
 class CommunityJoinRequestsScreen extends StatefulWidget {
@@ -128,7 +129,13 @@ class _CommunityJoinRequestsScreenState extends State<CommunityJoinRequestsScree
           children: [
             Row(
               children: [
-                ChatAvatar(name: name, imageUrl: user?.avatar, radius: 22),
+                ProfileTap(
+                  userId: user?.id ?? r.userId,
+                  name: name,
+                  email: user?.email,
+                  avatarUrl: user?.avatar,
+                  child: ChatAvatar(name: name, imageUrl: user?.avatar, radius: 22),
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(

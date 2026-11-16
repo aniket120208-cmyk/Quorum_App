@@ -3,6 +3,7 @@ import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/community_repository.dart';
 import 'package:quorum_app/models/community_models.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
+import 'package:quorum_app/screens/profile_screen/user_profile_screen.dart';
 import 'community_invite_screen.dart';
 import 'community_widgets.dart';
 
@@ -149,7 +150,17 @@ class _CommunityMembersScreenState extends State<CommunityMembersScreen> {
     ].join(' · ');
 
     return ListTile(
-      leading: ChatAvatar(name: m.user.name, imageUrl: m.user.avatarUrl, radius: 22),
+      onTap: () => openUserProfile(
+        context,
+        userId: m.user.id,
+        name: m.user.name,
+        email: m.user.email,
+        avatarUrl: m.user.avatarUrl,
+        role: m.role,
+        roleLabel: 'Community role',
+        joinedAt: m.joinedAt,
+      ),
+      leading: ChatAvatar(name: m.user.name, imageUrl: m.user.avatarUrl, radius: 22, userId: m.user.id),
       title: Row(
         children: [
           Flexible(

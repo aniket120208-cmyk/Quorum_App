@@ -6,16 +6,20 @@ import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/auth_service.dart';
 import 'package:quorum_app/api/community_repository.dart';
 import 'package:quorum_app/api/current_user.dart';
+import 'package:quorum_app/api/profile_picture_repository.dart';
 import 'package:quorum_app/api/saved_items_store.dart';
 import 'package:quorum_app/api/socket_service.dart';
 import 'package:quorum_app/api/upload_service.dart';
 import 'package:quorum_app/models/community_models.dart';
 import 'package:quorum_app/models/saved_item_models.dart';
-import 'package:quorum_app/widgets/copyable_id_tile.dart';
+import 'package:quorum_app/widgets/id_dialog.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
+import 'package:quorum_app/screens/organization_screen/organization_sheets.dart' show showOrgSheet;
+import 'community_edit_sheet.dart';
 import 'community_invite_screen.dart';
 import 'community_join_requests_screen.dart';
 import 'community_members_search.dart';
+import 'community_profile_screen.dart';
 import 'community_widgets.dart';
 import 'post_comments_screen.dart';
 
@@ -660,24 +664,63 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
   Future<void> _editCommunity() async {
     final d = _detail;
     if (d == null) return;
-    final result = await showDialog<(String, String)>(
+    final saved = await showOrgSheet<bool>(context, EditCommunitySheet(community: d));
+    if (saved != true || !mounted) return;
+    await _reloadDetail();
+    if (mounted) showCommunityToast(context, 'Community updated');
+  }
+
+  Future<void> _changePhoto() async {
+    final d = _detail;
+    if (d == null || !canManagePhoto) return;
+    final hasPhoto = d.avatar != null && d.avatar!.isNotEmpty;
+    final choice = await showModalBottomSheet<String>(
       context: context,
-      builder: (_) => CommunityFormDialog(
-        title: 'Edit community',
-        actionLabel: 'Save',
-        name: d.name,
-        description: d.description ?? '',
+      backgroundColor: AppColors.surface,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: AppColors.textPrimary),
+              title: const Text('Choose from gallery', style: TextStyle(color: AppColors.textPrimary)),
+              onTap: () => Navigator.pop(ctx, 'pick'),
+            ),
+            if (hasPhoto)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                title: const Text('Remove photo', style: TextStyle(color: Colors.redAccent)),
+                onTap: () => Navigator.pop(ctx, 'remove'),
+              ),
+          ],
+        ),
       ),
     );
-    if (result == null || !mounted) return;
+    if (choice == null || !mounted) return;
+    final pictures = ProfilePictureRepository.instance;
     try {
-      await _repo.updateCommunity(_id, name: result.$1, description: result.$2);
+      if (choice == 'remove') {
+        await pictures.remove(ProfilePictureTarget.community, _id);
+      } else {
+        final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+        if (picked == null || !mounted) return;
+        await pictures.uploadFile(
+          ProfilePictureTarget.community,
+          _id,
+          path: picked.path,
+          fileName: picked.name,
+        );
+      }
       await _reloadDetail();
-      if (mounted) showCommunityToast(context, 'Community updated');
+      if (mounted) {
+        showCommunityToast(context, choice == 'remove' ? 'Photo removed' : 'Photo updated');
+      }
     } catch (e) {
       if (mounted) showErrorSnack(context, errorText(e));
     }
   }
+
+  bool get canManagePhoto => _role == 'OWNER' || _role == 'ADMIN';
 
   Future<void> _leave() async {
     final ok = await confirmAction(
@@ -713,114 +756,37 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
     }
   }
 
-  Widget _header() {
+  Future<void> _showCommunityId() {
+    return showIdDialog(
+      context,
+      title: 'Community ID',
+      label: 'Community ID',
+      value: _id,
+      background: AppColors.surface,
+      titleColor: AppColors.textPrimary,
+      mutedColor: AppColors.textMuted,
+      valueColor: AppColors.textPrimary,
+      borderColor: AppColors.surfaceBorder,
+      accentColor: AppColors.primary,
+    );
+  }
+
+  Future<void> _openProfile() async {
     final d = _detail;
-    if (d == null) return const SizedBox.shrink();
-    final description = d.description;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.surfaceBorder),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              CommunityAvatar(name: d.name, size: 56),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      d.name,
-                      style: const TextStyle(
-                        color: AppColors.textPrimary,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        const Icon(Icons.people_outline, size: 15, color: AppColors.textSecondary),
-                        const SizedBox(width: 4),
-                        Text(
-                          d.memberCount == 1 ? '1 member' : '${d.memberCount} members',
-                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
-                        ),
-                        const SizedBox(width: 8),
-                        RoleBadge(role: d.role),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (description != null && description.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text(
-              description,
-              style: const TextStyle(color: AppColors.textSecondary, fontSize: 14, height: 1.4),
-            ),
-          ],
-          if (d.ownerName.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                ChatAvatar(name: d.ownerName, imageUrl: d.ownerAvatar, radius: 10),
-                const SizedBox(width: 8),
-                Text(
-                  'Owned by ${d.ownerName}',
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
-                ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 12),
-          CopyableIdTile(
-            label: 'Community ID',
-            value: _id,
-            labelColor: AppColors.textMuted,
-            valueColor: AppColors.textPrimary,
-            borderColor: AppColors.surfaceBorder,
-            accentColor: AppColors.primary,
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _openMembers,
-                  icon: const Icon(Icons.people_outline, size: 18),
-                  label: const Text('Members'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textPrimary,
-                    side: const BorderSide(color: AppColors.surfaceBorder),
-                  ),
-                ),
-              ),
-              if (canModerate(_role)) ...[
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _openInvite,
-                    icon: const Icon(Icons.person_add_alt_1, size: 18),
-                    label: const Text('Invite'),
-                    style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ],
+    if (d == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CommunityProfileScreen(
+          detail: d,
+          canManagePhoto: canManagePhoto,
+          canInvite: canModerate(_role),
+          onMembers: _openMembers,
+          onInvite: _openInvite,
+          onChangePhoto: _changePhoto,
+        ),
       ),
     );
+    if (mounted) _reloadDetail();
   }
 
   Widget _feed() {
@@ -832,10 +798,9 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
-        itemCount: _posts.length + 2,
+        itemCount: _posts.length + 1,
         itemBuilder: (context, i) {
-          if (i == 0) return _header();
-          final index = i - 1;
+          final index = i;
           if (index >= _posts.length) {
             if (_loadingMore) {
               return const Padding(
@@ -978,7 +943,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
             IconButton(
               tooltip: 'Attach',
               onPressed: _posting ? null : _pickAttachment,
-              icon: const Icon(Icons.attach_file, color: AppColors.textSecondary),
+              icon: const Icon(Icons.add, color: AppColors.textSecondary),
             ),
             Expanded(
               child: Container(
@@ -1059,13 +1024,36 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
         backgroundColor: darkBg,
         elevation: 0,
         iconTheme: const IconThemeData(color: AppColors.textPrimary),
-        title: Text(
-          _name,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold),
+        scrolledUnderElevation: 0,
+        titleSpacing: 0,
+        title: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: _detail == null ? null : _openProfile,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                CommunityAvatar(name: _name, size: 34, imageUrl: _detail?.avatar),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
         actions: [
+          if (_detail != null && _role == 'OWNER')
+            IconButton(
+              tooltip: 'Edit community',
+              onPressed: _editCommunity,
+              icon: const Icon(Icons.edit_outlined, color: AppColors.textPrimary),
+            ),
           if (_detail != null)
             PopupMenuButton<String>(
               color: AppColors.surface,
@@ -1075,6 +1063,8 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
               ),
               onSelected: (v) {
                 switch (v) {
+                  case 'id':
+                    _showCommunityId();
                   case 'members':
                     _openMembers();
                   case 'invite':
@@ -1083,6 +1073,8 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                     _openJoinRequests();
                   case 'edit':
                     _editCommunity();
+                  case 'photo':
+                    _changePhoto();
                   case 'leave':
                     _leave();
                   case 'delete':
@@ -1090,6 +1082,10 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                 }
               },
               itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'id',
+                  child: Text('Community ID', style: TextStyle(color: AppColors.textPrimary)),
+                ),
                 const PopupMenuItem(
                   value: 'members',
                   child: Text('Members', style: TextStyle(color: AppColors.textPrimary)),
@@ -1104,10 +1100,15 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                     value: 'requests',
                     child: Text('Join requests', style: TextStyle(color: AppColors.textPrimary)),
                   ),
-                if (canModerate(_role))
+                if (canModerate(_role) && _role != 'OWNER')
                   const PopupMenuItem(
                     value: 'edit',
                     child: Text('Edit details', style: TextStyle(color: AppColors.textPrimary)),
+                  ),
+                if (canManagePhoto)
+                  const PopupMenuItem(
+                    value: 'photo',
+                    child: Text('Change photo', style: TextStyle(color: AppColors.textPrimary)),
                   ),
                 const PopupMenuItem(
                   value: 'leave',

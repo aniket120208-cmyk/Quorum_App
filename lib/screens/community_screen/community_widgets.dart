@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:quorum_app/models/community_models.dart';
 import 'package:quorum_app/screens/chat_screen/attachment_widgets.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
 import 'package:quorum_app/form_validators.dart';
+import 'package:quorum_app/screens/profile_screen/user_profile_screen.dart';
 
 String timeAgo(DateTime t) {
   final d = DateTime.now().difference(t);
@@ -91,14 +91,28 @@ InputDecoration communityFieldDecoration(String hint) {
 }
 
 class CommunityAvatar extends StatelessWidget {
-  const CommunityAvatar({super.key, required this.name, this.size = 48});
+  const CommunityAvatar({super.key, required this.name, this.size = 48, this.imageUrl});
 
   final String name;
   final double size;
+  final String? imageUrl;
 
   @override
   Widget build(BuildContext context) {
-    final initial = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?';
+    final url = imageUrl;
+    if (url != null && url.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(size * 0.3),
+        child: Image.network(
+          url,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => CommunityAvatar(name: name, size: size),
+        ),
+      );
+    }
+    final initial = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '';
     return Container(
       width: size,
       height: size,
@@ -330,11 +344,8 @@ class ChannelBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return SizedBox(
       height: 48,
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppColors.surfaceBorder)),
-      ),
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -433,12 +444,7 @@ class PostAttachmentView extends StatelessWidget {
 
   final CommunityPost post;
 
-  Future<void> _open(BuildContext context) async {
-    final uri = Uri.tryParse(post.fileUrl ?? '');
-    if (uri == null) return;
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok && context.mounted) showErrorSnack(context, 'Could not open this file');
-  }
+  void _open(BuildContext context) => openFilePreview(context, post.fileUrl ?? '', post.attachmentName);
 
   @override
   Widget build(BuildContext context) {
@@ -447,7 +453,9 @@ class PostAttachmentView extends StatelessWidget {
     if (post.isImage) {
       return GestureDetector(
         onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => ImageViewerScreen(url: url)),
+          MaterialPageRoute(
+            builder: (_) => ImageViewerScreen(url: url, fileName: post.attachmentName),
+          ),
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
@@ -503,7 +511,7 @@ class PostAttachmentView extends StatelessWidget {
                 style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
               ),
             ),
-            const Icon(Icons.open_in_new, size: 16, color: AppColors.textSecondary),
+            DownloadButton(url: url, fileName: post.attachmentName, color: AppColors.textSecondary),
           ],
         ),
       ),
@@ -536,8 +544,7 @@ class PostCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final count = post.commentCount;
-    final showText = post.content.isNotEmpty &&
-        !(post.hasAttachment && post.content == post.attachmentName);
+    final showText = post.content.isNotEmpty && !post.contentIsFileName;
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
@@ -551,7 +558,12 @@ class PostCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              ChatAvatar(name: post.authorName, imageUrl: post.authorAvatar, radius: 18),
+              ProfileTap(
+                userId: post.authorId,
+                name: post.authorName,
+                avatarUrl: post.authorAvatar,
+                child: ChatAvatar(name: post.authorName, imageUrl: post.authorAvatar, radius: 18),
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(

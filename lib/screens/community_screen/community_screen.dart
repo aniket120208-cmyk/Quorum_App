@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/community_repository.dart';
 import 'package:quorum_app/api/notification_service.dart';
@@ -9,7 +11,9 @@ import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
 import 'package:quorum_app/screens/community_screen/communtiy_details_screen.dart';
 import 'package:quorum_app/widgets/wallet_card_stack.dart';
 import 'community_discover_screen.dart';
+import 'community_form_screen.dart';
 import 'community_widgets.dart';
+import 'join_community_screen.dart';
 
 enum _Filter { all, owned, member }
 
@@ -35,8 +39,9 @@ class _CommunityScreenState extends State<CommunityScreen> {
   String? _error;
   _Filter _filter = _Filter.all;
   StreamSubscription<NotificationItem>? _notificationSub;
-  bool _walletMode = false;
+  bool _listMode = false;
   int _walletFront = 0;
+  bool _headerVisible = true;
 
   @override
   void initState() {
@@ -98,9 +103,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
   }
 
   Future<void> _create() async {
-    final result = await showDialog<(String, String)>(
-      context: context,
-      builder: (_) => const CommunityFormDialog(title: 'New community', actionLabel: 'Create'),
+    final result = await Navigator.of(context).push<(String, String)>(
+      MaterialPageRoute(builder: (_) => const CommunityFormScreen()),
     );
     if (result == null || !mounted) return;
     try {
@@ -114,13 +118,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
   }
 
   Future<void> _joinWithLink() async {
-    final input = await showDialog<String>(
-      context: context,
-      builder: (_) => const TextPromptDialog(
-        title: 'Join with invite link',
-        hint: 'Paste the invite link or code',
-        actionLabel: 'Continue',
-      ),
+    final input = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const JoinCommunityScreen()),
     );
     if (input == null || input.isEmpty || !mounted) return;
 
@@ -184,71 +183,48 @@ class _CommunityScreenState extends State<CommunityScreen> {
     }
   }
 
+  bool _onScrollDirection(UserScrollNotification n) {
+    if (n.depth != 0) return false;
+    if (n.direction == ScrollDirection.reverse && _headerVisible) {
+      setState(() => _headerVisible = false);
+    } else if (n.direction == ScrollDirection.forward && !_headerVisible) {
+      setState(() => _headerVisible = true);
+    }
+    return false;
+  }
+
   Widget _header() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+    return SizedBox(
+      height: 56,
       child: Row(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: [violet, violetLight],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+          const SizedBox(width: 16),
+          const Expanded(
+            child: Text(
+              'Community',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
               ),
-            ),
-            child: const Icon(Icons.groups, color: Colors.white, size: 18),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Text(
-                  'Community',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                SizedBox(height: 2),
-                Text(
-                  'Explore & connect',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: Color(0xFF9A9CB8), fontSize: 12),
-                ),
-              ],
             ),
           ),
           IconButton(
             tooltip: 'Discover communities',
             onPressed: _discover,
-            icon: const Icon(Icons.search, color: violetLight, size: 22),
+            icon: const Icon(Icons.search_rounded, color: Colors.white),
           ),
           IconButton(
             tooltip: 'Join with link',
             onPressed: _joinWithLink,
-            icon: const Icon(Icons.link, color: violetLight, size: 20),
+            icon: const Icon(Icons.link_rounded, color: Colors.white),
           ),
-          const SizedBox(width: 4),
-          FilledButton.icon(
+          IconButton(
+            tooltip: 'New community',
             onPressed: _create,
-            icon: const Icon(Icons.add, size: 14),
-            label: const Text('Create', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-            style: FilledButton.styleFrom(
-              backgroundColor: violet,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              shape: const StadiumBorder(),
-            ),
+            icon: const Icon(Icons.add_rounded, color: Colors.white),
           ),
         ],
       ),
@@ -264,18 +240,18 @@ class _CommunityScreenState extends State<CommunityScreen> {
           onTap: () => setState(() => _filter = f),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: selected ? violet : cardBg,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: selected ? violetLight : cardBorder, width: 1.2),
+              color: selected ? AppColors.primary : Colors.transparent,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: selected ? AppColors.primary : AppColors.surfaceBorder),
             ),
             child: Text(
               label,
               style: TextStyle(
-                color: selected ? Colors.white : const Color(0xFFB4B6D0),
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
+                color: selected ? AppColors.textPrimary : AppColors.textSecondary,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                fontSize: 14,
               ),
             ),
           ),
@@ -333,27 +309,29 @@ class _CommunityScreenState extends State<CommunityScreen> {
             ),
             child: Row(
               children: [
-                Container(
-                  width: 54,
-                  height: 54,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    gradient: const LinearGradient(
-                      colors: [violet, violetLight],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                  ),
-                  child: Text(
-                    _initials(c.name),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
+                (c.avatar ?? '').isNotEmpty
+                    ? CommunityAvatar(name: c.name, size: 54, imageUrl: c.avatar)
+                    : Container(
+                        width: 54,
+                        height: 54,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          gradient: const LinearGradient(
+                            colors: [violet, violetLight],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                        ),
+                        child: Text(
+                          _initials(c.name),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -454,11 +432,11 @@ class _CommunityScreenState extends State<CommunityScreen> {
             duration: const Duration(milliseconds: 180),
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: active ? violet : cardBg,
+              color: active ? AppColors.primary : Colors.transparent,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: active ? violetLight : cardBorder, width: 1.2),
+              border: Border.all(color: active ? AppColors.primary : AppColors.surfaceBorder),
             ),
-            child: Icon(icon, size: 18, color: active ? Colors.white : const Color(0xFFB4B6D0)),
+            child: Icon(icon, size: 18, color: active ? AppColors.textPrimary : AppColors.textSecondary),
           ),
         ),
       );
@@ -467,9 +445,9 @@ class _CommunityScreenState extends State<CommunityScreen> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        btn(Icons.style_outlined, !_walletMode, 'List', () => setState(() => _walletMode = false)),
+        btn(Icons.style_outlined, !_listMode, 'Cards', () => setState(() => _listMode = false)),
         const SizedBox(width: 6),
-        btn(Icons.view_agenda_outlined, _walletMode, 'Cards', () => setState(() => _walletMode = true)),
+        btn(Icons.view_agenda_outlined, _listMode, 'List', () => setState(() => _listMode = true)),
       ],
     );
   }
@@ -539,16 +517,18 @@ class _CommunityScreenState extends State<CommunityScreen> {
                 style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
               ),
               const Spacer(),
-              Container(
-                width: 34,
-                height: 34,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.22)),
-                child: Text(
-                  _initials(c.name),
-                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
-                ),
-              ),
+              (c.avatar ?? '').isNotEmpty
+                  ? ClipOval(child: CommunityAvatar(name: c.name, size: 34, imageUrl: c.avatar))
+                  : Container(
+                      width: 34,
+                      height: 34,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.22)),
+                      child: Text(
+                        _initials(c.name),
+                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
+                      ),
+                    ),
             ],
           ),
         ],
@@ -561,7 +541,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         const footerHeight = 76.0;
-        final stackMax = constraints.maxHeight - footerHeight;
+        final stackMax = math.max(0.0, constraints.maxHeight - footerHeight);
         return SingleChildScrollView(
           physics: const NeverScrollableScrollPhysics(),
           child: ConstrainedBox(
@@ -648,33 +628,54 @@ class _CommunityScreenState extends State<CommunityScreen> {
   Widget build(BuildContext context) {
     final list = _filtered;
     final showContent = !_loading && _error == null && list.isNotEmpty;
+    final showingWallet = showContent && !_listMode;
+    final headerShown = _headerVisible || showingWallet;
+
+    final navInset = math.max(0.0, MediaQuery.of(context).padding.bottom);
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       backgroundColor: darkBg,
       body: SafeArea(
         bottom: false,
         child: Column(
           children: [
-            _header(),
+            ClipRect(
+              child: AnimatedAlign(
+                alignment: Alignment.topCenter,
+                heightFactor: headerShown ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOut,
+                child: _header(),
+              ),
+            ),
             _filterChips(),
             const SizedBox(height: 8),
             Expanded(
-              child: (showContent && !_walletMode)
-                  ? _walletView(list)
-                  : RefreshIndicator(
-                      color: violet,
-                      backgroundColor: cardBg,
-                      onRefresh: () => _load(silent: true),
-                      child: ListView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.only(bottom: 24),
-                        children: [
-                          if (showContent) ...[
-                            _communitiesHeader(),
-                            for (final c in list) _communityCard(c),
-                          ] else
-                            _statusBlock(),
-                        ],
+              child: showingWallet
+                  ? Padding(
+                      padding: EdgeInsets.only(
+                        bottom: math.max(0.0, navInset - 4),
+                      ),
+                      child: _walletView(list),
+                    )
+                  : NotificationListener<UserScrollNotification>(
+                      onNotification: _onScrollDirection,
+                      child: RefreshIndicator(
+                        color: violet,
+                        backgroundColor: cardBg,
+                        onRefresh: () => _load(silent: true),
+                        child: ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: EdgeInsets.only(bottom: 4 + navInset),
+                          children: [
+                            if (showContent) ...[
+                              _communitiesHeader(),
+                              for (final c in list) _communityCard(c),
+                            ] else
+                              _statusBlock(),
+                          ],
+                        ),
                       ),
                     ),
             ),

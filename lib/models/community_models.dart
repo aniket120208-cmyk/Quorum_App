@@ -36,10 +36,12 @@ class Community {
   final String role;
   final int memberCount;
   final DateTime? createdAt;
+  final String? avatar;
 
   const Community({
     required this.id,
     required this.name,
+    this.avatar,
     this.description,
     required this.role,
     required this.memberCount,
@@ -53,12 +55,22 @@ class Community {
         role: (j['role'] ?? j['currentUserRole'] ?? 'MEMBER').toString().toUpperCase(),
         memberCount: _int(j['memberCount']),
         createdAt: _date(j['createdAt'] ?? j['joinedAt']),
+        avatar: _avatarOf(j),
       );
+}
+
+String? _avatarOf(Map<String, dynamic> j) {
+  for (final key in const ['avatarUrl', 'avatar', 'icon', 'logo', 'profilePicture', 'imageUrl', 'image']) {
+    final v = j[key];
+    if (v is String && v.trim().isNotEmpty) return v.trim();
+  }
+  return null;
 }
 
 class CommunityDetail {
   final String id;
   final String name;
+  final String? avatar;
   final String? description;
   final String ownerId;
   final String ownerName;
@@ -70,6 +82,7 @@ class CommunityDetail {
   const CommunityDetail({
     required this.id,
     required this.name,
+    this.avatar,
     this.description,
     required this.ownerId,
     required this.ownerName,
@@ -81,9 +94,11 @@ class CommunityDetail {
 
   factory CommunityDetail.fromJson(Map<String, dynamic> j) {
     final owner = j['owner'] is Map ? Map<String, dynamic>.from(j['owner']) : <String, dynamic>{};
+    final rawAvatar = _avatarOf(j);
     return CommunityDetail(
       id: j['id'].toString(),
       name: (j['name'] ?? '').toString(),
+      avatar: (rawAvatar == null || rawAvatar.isEmpty) ? null : rawAvatar,
       description: j['description']?.toString(),
       ownerId: (j['ownerId'] ?? owner['id'] ?? '').toString(),
       ownerName: (owner['name'] ?? '').toString(),
@@ -181,6 +196,14 @@ class CommunityPost {
   bool get isImage => hasAttachment && fileType == 'image';
 
   bool get isDocument => hasAttachment && (fileType == 'document' || fileType == 'file');
+
+  bool get contentIsFileName {
+    if (!hasAttachment) return false;
+    final c = content.trim();
+    if (c.isEmpty) return false;
+    if (c == attachmentName) return true;
+    return isImage && RegExp(r'^\S+\.(jpe?g|png|gif|webp|heic|bmp)$', caseSensitive: false).hasMatch(c);
+  }
 
   String get attachmentName {
     final u = fileUrl;
@@ -405,7 +428,7 @@ class DiscoveredCommunity {
       );
 
   factory DiscoveredCommunity.fromJson(Map<String, dynamic> j) {
-    final rawIcon = j['icon']?.toString();
+    final rawIcon = (j['icon'] ?? j['avatarUrl'] ?? j['avatar'])?.toString();
     final rawPending = j['pendingRequestId']?.toString();
     return DiscoveredCommunity(
       id: j['id'].toString(),
@@ -481,7 +504,7 @@ class JoinRequestCommunity {
   });
 
   factory JoinRequestCommunity.fromJson(Map<String, dynamic> j) {
-    final rawIcon = j['icon']?.toString();
+    final rawIcon = (j['icon'] ?? j['avatarUrl'] ?? j['avatar'])?.toString();
     return JoinRequestCommunity(
       id: (j['id'] ?? '').toString(),
       name: (j['name'] ?? '').toString(),

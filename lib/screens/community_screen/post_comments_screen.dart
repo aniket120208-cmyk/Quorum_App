@@ -6,6 +6,7 @@ import 'package:quorum_app/api/socket_service.dart';
 import 'package:quorum_app/models/community_models.dart';
 import 'package:quorum_app/models/saved_item_models.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
+import 'package:quorum_app/screens/profile_screen/user_profile_screen.dart';
 import 'community_widgets.dart';
 
 class PostCommentsScreen extends StatefulWidget {
@@ -244,7 +245,12 @@ class _PostCommentsScreenState extends State<PostCommentsScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ChatAvatar(name: c.authorName, imageUrl: c.authorAvatar, radius: 16),
+          ProfileTap(
+            userId: c.authorId,
+            name: c.authorName,
+            avatarUrl: c.authorAvatar,
+            child: ChatAvatar(name: c.authorName, imageUrl: c.authorAvatar, radius: 16),
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Container(
