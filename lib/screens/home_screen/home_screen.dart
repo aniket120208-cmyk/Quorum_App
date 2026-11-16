@@ -32,6 +32,8 @@ import 'package:quorum_app/screens/chat_screen/chat_screen.dart';
 import 'package:quorum_app/screens/ai_assistant_screen/ai_assistant_screen.dart';
 import 'package:quorum_app/screens/community_screen/community_screen.dart';
 import 'package:quorum_app/screens/video_call_screen/video_call_screen.dart';
+import 'package:quorum_app/screens/home_screen/my_teams_screen.dart';
+import 'package:quorum_app/screens/organization_screen/team_tasks_screen.dart';
 import 'calender_card.dart';
 
 const _card = Color(0xFF14151F);
@@ -117,6 +119,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   List<CalendarEvent> _events = [];
   List<TeamTask> _myTasks = [];
+  final Map<String, Organization> _taskOrgs = {};
   bool _storiesLoaded = false;
 
   @override
@@ -361,6 +364,7 @@ class _HomeScreenState extends State<HomeScreen>
     } catch (_) {}
 
     final tasks = <TeamTask>[];
+    final taskOrgs = <String, Organization>{};
     try {
       final orgs =
           _orgs ?? await OrganizationRepository.instance.organizations();
@@ -371,8 +375,12 @@ class _HomeScreenState extends State<HomeScreen>
                   .catchError((_) => <TeamTask>[]),
             ),
       );
-      for (final list in lists) {
-        tasks.addAll(list);
+      final scoped = orgs.take(6).toList();
+      for (var i = 0; i < lists.length; i++) {
+        tasks.addAll(lists[i]);
+        for (final t in lists[i]) {
+          taskOrgs[t.id] = scoped[i];
+        }
       }
     } catch (_) {}
 
@@ -380,6 +388,9 @@ class _HomeScreenState extends State<HomeScreen>
     setState(() {
       _events = events;
       _myTasks = tasks;
+      _taskOrgs
+        ..clear()
+        ..addAll(taskOrgs);
       _storiesLoaded = true;
     });
   }
@@ -455,6 +466,7 @@ class _HomeScreenState extends State<HomeScreen>
               text: t.title,
               trailing:
                   t.dueDate != null ? taskDueLabel(t.dueDate!) : t.status.label,
+              onTap: () => _openTask(t),
             ),
         ],
       ),
@@ -495,8 +507,27 @@ class _HomeScreenState extends State<HomeScreen>
                   : '${o.membersCount} members',
             ),
         ],
+        actionLabel: orgs.isEmpty ? null : 'View all my teams',
+        onAction: orgs.isEmpty
+            ? null
+            : () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => MyTeamsScreen(organizations: orgs)),
+                ),
       ),
     ];
+  }
+
+  void _openTask(TeamTask task) {
+    final org = _taskOrgs[task.id];
+    if (org == null) return;
+    final team = OrgTeam(
+      id: task.teamId,
+      name: (task.teamName ?? '').isEmpty ? 'Team' : task.teamName!,
+      membersCount: 0,
+    );
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => TeamTasksScreen(organization: org, team: team)),
+    );
   }
 
   Widget _buildStories() {

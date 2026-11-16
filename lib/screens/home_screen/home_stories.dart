@@ -5,7 +5,8 @@ class StoryLine {
   final Color? iconColor;
   final String text;
   final String? trailing;
-  const StoryLine({required this.icon, required this.text, this.iconColor, this.trailing});
+  final VoidCallback? onTap;
+  const StoryLine({required this.icon, required this.text, this.iconColor, this.trailing, this.onTap});
 }
 
 class StorySlide {
@@ -250,7 +251,15 @@ class _StoryViewerState extends State<StoryViewer> with SingleTickerProviderStat
         opacity: value,
         child: Transform.translate(offset: Offset(0, 22 * (1 - value)), child: child),
       ),
-      child: Container(
+      child: IgnorePointer(
+        ignoring: line.onTap == null,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            Navigator.of(context).pop();
+            line.onTap!();
+          },
+          child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
         decoration: BoxDecoration(
@@ -278,6 +287,8 @@ class _StoryViewerState extends State<StoryViewer> with SingleTickerProviderStat
               ),
             ],
           ],
+        ),
+          ),
         ),
       ),
     );
@@ -341,15 +352,14 @@ class _StoryViewerState extends State<StoryViewer> with SingleTickerProviderStat
                       ],
                     ),
                     Expanded(
-                      child: IgnorePointer(
-                        child: AnimatedSwitcher(
+                      child: AnimatedSwitcher(
                           duration: const Duration(milliseconds: 260),
                           child: Column(
                             key: ValueKey(slide.id),
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Text(
+                              IgnorePointer(child: Text(
                                 slide.headline,
                                 style: const TextStyle(
                                   color: Colors.white,
@@ -358,18 +368,17 @@ class _StoryViewerState extends State<StoryViewer> with SingleTickerProviderStat
                                   height: 1.1,
                                   letterSpacing: -0.5,
                                 ),
-                              ),
+                              )),
                               const SizedBox(height: 8),
-                              Text(
+                              IgnorePointer(child: Text(
                                 slide.subtitle,
                                 style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 15, height: 1.35),
-                              ),
+                              )),
                               const SizedBox(height: 24),
                               for (var i = 0; i < slide.lines.length; i++) _lineTile(slide.lines[i], i),
                             ],
                           ),
                         ),
-                      ),
                     ),
                     if (slide.actionLabel != null && slide.onAction != null)
                       SizedBox(
