@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_background/flutter_background.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 class ScreenShareForeground {
   ScreenShareForeground._();
@@ -11,8 +10,6 @@ class ScreenShareForeground {
 
   static Future<bool> start() async {
     if (!_isAndroid) return true;
-    final granted = await Helper.requestCapturePermission();
-    if (!granted) return false;
     if (!_initialized) {
       _initialized = await FlutterBackground.initialize(
         androidConfig: FlutterBackgroundAndroidConfig(
@@ -29,7 +26,7 @@ class ScreenShareForeground {
   static Future<void> stop() async {
     if (!_isAndroid) return;
     try {
-      await FlutterBackground.disableBackgroundExecution();
+      await FlutterBackground.disableBackgroundExecution().timeout(const Duration(seconds: 3));
     } catch (_) {}
   }
 }
