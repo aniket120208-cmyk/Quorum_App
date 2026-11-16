@@ -58,7 +58,16 @@ String? _meetingText(dynamic v) {
 
 Map<String, dynamic> _meetingMap(dynamic v) => v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
 
+class MeetingDocument {
+  final String documentId;
+  final String title;
+  final String openedBy;
+
+  const MeetingDocument({required this.documentId, required this.title, this.openedBy = ''});
+}
+
 class MeetingInfo {
+  final String id;
   final String code;
   final String hostId;
   final String hostName;
@@ -67,8 +76,12 @@ class MeetingInfo {
   final MeetingScope scope;
   final MeetingStatus status;
   final DateTime? scheduledStartTime;
+  final String? organizationId;
+  final String? organizationName;
+  final String? teamId;
 
   const MeetingInfo({
+    this.id = '',
     required this.code,
     required this.hostId,
     required this.hostName,
@@ -77,11 +90,17 @@ class MeetingInfo {
     this.scope = MeetingScope.personal,
     this.status = MeetingStatus.active,
     this.scheduledStartTime,
+    this.organizationId,
+    this.organizationName,
+    this.teamId,
   });
 
   factory MeetingInfo.fromJson(Map<String, dynamic> j) {
     final host = _meetingMap(j['host']);
+    final organization = _meetingMap(j['organization']);
+    final team = _meetingMap(j['team']);
     return MeetingInfo(
+      id: (j['id'] ?? '').toString(),
       code: (j['code'] ?? '').toString(),
       hostId: (j['hostId'] ?? host['id'] ?? '').toString(),
       hostName: (host['name'] ?? '').toString(),
@@ -90,6 +109,9 @@ class MeetingInfo {
       scope: MeetingScope.fromValue(j['scopeType']),
       status: MeetingStatus.fromValue(j['status']),
       scheduledStartTime: _meetingDate(j['scheduledStartTime']),
+      organizationId: _meetingText(j['organizationId'] ?? organization['id']),
+      organizationName: _meetingText(organization['name']),
+      teamId: _meetingText(j['teamId'] ?? team['id']),
     );
   }
 }
@@ -212,6 +234,13 @@ class MeetingHistoryItem {
         durationSeconds: r.durationSeconds,
       );
 
+  factory MeetingHistoryItem.fromScoped(ScopedMeeting m) => MeetingHistoryItem(
+        code: m.code,
+        title: m.title,
+        timestamp: m.scheduledStartTime ?? DateTime.now(),
+        durationSeconds: 0,
+      );
+
   factory MeetingHistoryItem.fromJson(Map<String, dynamic> j) => MeetingHistoryItem(
         code: j['code'].toString(),
         title: (j['title'] ?? 'Meeting').toString(),
@@ -278,9 +307,10 @@ class WaitingGuest {
 }
 
 class RemotePeer {
-  RemotePeer({required this.userId, required this.name});
+  RemotePeer({required this.userId, required this.name, this.avatarUrl});
   final String userId;
   String name;
+  String? avatarUrl;
   bool isMuted = false;
   bool isVideoOff = false;
   bool hasVideo = false;

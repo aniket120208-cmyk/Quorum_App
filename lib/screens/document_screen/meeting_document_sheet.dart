@@ -84,7 +84,9 @@ class _MeetingDocumentSheetState extends State<MeetingDocumentSheet> {
           meetingDocs = await _repo.list(meetingId: widget.meetingId);
         } catch (_) {}
       }
-      final all = await _repo.list(organizationId: widget.organizationId);
+      final all = widget.organizationId.isEmpty
+          ? <DocumentSummary>[]
+          : await _repo.list(organizationId: widget.organizationId);
       final meetingIds = meetingDocs.map((d) => d.id).toSet();
       final others = all
           .where((d) =>
@@ -139,9 +141,13 @@ class _MeetingDocumentSheetState extends State<MeetingDocumentSheet> {
     setState(() => _busy = true);
     try {
       final hasMeeting = widget.meetingId.isNotEmpty;
+      final hasOrg = widget.organizationId.isNotEmpty;
       final doc = await _repo.create(
         title: title,
-        scope: hasMeeting ? DocumentScope.meeting : DocumentScope.personal,
+        scope: hasMeeting
+            ? DocumentScope.meeting
+            : (hasOrg ? DocumentScope.organization : DocumentScope.personal),
+        organizationId: hasOrg ? widget.organizationId : null,
         meetingId: hasMeeting ? widget.meetingId : null,
       );
       await _repo.openInMeeting(doc.id, widget.meetingCode);

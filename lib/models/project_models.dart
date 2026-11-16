@@ -11,7 +11,7 @@ Map<String, dynamic> _asMap(dynamic v) => v is Map ? Map<String, dynamic>.from(v
 
 enum ProjectRole {
   projectManager('PROJECT_MANAGER', 'Manager'),
-  internalMember('INTERNAL_MEMBER', 'Internal Member'),
+  internalMember('INTERNAL_MEMBER', 'Manager'),
   freelancer('FREELANCER', 'Freelancer'),
   client('CLIENT', 'Client');
 
@@ -20,6 +20,12 @@ enum ProjectRole {
   final String label;
 
   bool get isExternal => this == ProjectRole.freelancer || this == ProjectRole.client;
+
+  static const List<ProjectRole> selectable = [
+    ProjectRole.projectManager,
+    ProjectRole.client,
+    ProjectRole.freelancer,
+  ];
 
   static ProjectRole fromString(String? v) {
     switch ((v ?? '').toUpperCase()) {
@@ -149,7 +155,6 @@ class Project {
   final String name;
   final String? description;
   final String status;
-  final double? budget;
   final DateTime? dueDate;
   final ProjectOrg? organization;
   final String? conversationId;
@@ -163,7 +168,6 @@ class Project {
     required this.name,
     this.description,
     required this.status,
-    this.budget,
     this.dueDate,
     this.organization,
     this.conversationId,
@@ -185,7 +189,6 @@ class Project {
         name: name,
         description: description,
         status: status,
-        budget: budget,
         dueDate: dueDate,
         organization: organization,
         conversationId: conversationId,
@@ -206,7 +209,6 @@ class Project {
       name: (j['name'] ?? '').toString(),
       description: _str(j['description']),
       status: (j['status'] ?? 'ACTIVE').toString(),
-      budget: _num(j['budget']),
       dueDate: _date(j['dueDate']),
       organization: j['organization'] is Map ? ProjectOrg.fromJson(_asMap(j['organization'])) : null,
       conversationId: _str(conv['id'] ?? j['conversationId']),
@@ -231,6 +233,7 @@ class ProjectTask {
   final String? deliverableUrl;
   final String? deliverableNote;
   final String? reviewFeedback;
+  final String? reviewFeedbackUrl;
 
   const ProjectTask({
     required this.id,
@@ -245,6 +248,7 @@ class ProjectTask {
     this.deliverableUrl,
     this.deliverableNote,
     this.reviewFeedback,
+    this.reviewFeedbackUrl,
   });
 
   bool get isOverdue =>
@@ -255,6 +259,16 @@ class ProjectTask {
 
   factory ProjectTask.fromJson(Map<String, dynamic> j, {String projectId = ''}) {
     final assignee = j['assignee'] is Map ? ProjectUser.fromJson(_asMap(j['assignee'])) : null;
+    var feedback = _str(j['reviewFeedback'] ?? j['feedback'] ?? j['deliverableFeedback']);
+    var feedbackUrl = _str(j['reviewFeedbackUrl'] ?? j['feedbackFileUrl'] ?? j['feedbackUrl'] ?? j['reviewFileUrl']);
+    if (feedback != null) {
+      final match = RegExp(r'\n*Attachment: (https?://\S+)\s*$').firstMatch(feedback);
+      if (match != null) {
+        feedbackUrl ??= match.group(1);
+        feedback = feedback.substring(0, match.start).trim();
+        if (feedback.isEmpty) feedback = null;
+      }
+    }
     return ProjectTask(
       id: (j['id'] ?? '').toString(),
       projectId: (j['projectId'] ?? projectId).toString(),
@@ -267,7 +281,8 @@ class ProjectTask {
       dueDate: _date(j['dueDate']),
       deliverableUrl: _str(j['deliverableUrl']),
       deliverableNote: _str(j['deliverableNote']),
-      reviewFeedback: _str(j['reviewFeedback'] ?? j['feedback'] ?? j['deliverableFeedback']),
+      reviewFeedback: feedback,
+      reviewFeedbackUrl: feedbackUrl,
     );
   }
 }

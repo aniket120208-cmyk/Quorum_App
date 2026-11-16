@@ -35,6 +35,7 @@ class RecordingUser {
   final String id;
   final String name;
   final String? avatar;
+
   const RecordingUser({required this.id, required this.name, this.avatar});
 
   factory RecordingUser.fromJson(Map<String, dynamic> j) => RecordingUser(
@@ -163,6 +164,7 @@ class RecordingPage {
   final int page;
   final int totalPages;
   final int total;
+
   const RecordingPage({required this.items, required this.page, required this.totalPages, required this.total});
 
   bool get hasMore => page < totalPages;
@@ -172,6 +174,7 @@ class RecordingSummary {
   final String recordingId;
   final bool isCached;
   final String summary;
+
   const RecordingSummary({required this.recordingId, required this.isCached, required this.summary});
 
   factory RecordingSummary.fromJson(Map<String, dynamic> j) => RecordingSummary(
@@ -184,5 +187,6 @@ class RecordingSummary {
 class RecordingUploadTarget {
   final String uploadUrl;
   final String fileUrl;
+
   const RecordingUploadTarget({required this.uploadUrl, required this.fileUrl});
 }

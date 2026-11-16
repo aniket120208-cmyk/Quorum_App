@@ -51,6 +51,7 @@ class MeetingCard extends StatelessWidget {
     required this.onJoin,
     required this.onCopy,
     required this.onCancel,
+    this.onRecordings,
   });
 
   final ScopedMeeting meeting;
@@ -59,6 +60,7 @@ class MeetingCard extends StatelessWidget {
   final VoidCallback onJoin;
   final VoidCallback onCopy;
   final VoidCallback onCancel;
+  final VoidCallback? onRecordings;
 
   @override
   Widget build(BuildContext context) {
@@ -158,6 +160,12 @@ class MeetingCard extends StatelessWidget {
                 onPressed: onCopy,
                 icon: const Icon(Icons.link_rounded, color: orgMuted, size: 20),
               ),
+              if (onRecordings != null)
+                IconButton(
+                  tooltip: 'Recordings',
+                  onPressed: onRecordings,
+                  icon: const Icon(Icons.video_library_outlined, color: orgMuted, size: 20),
+                ),
               const Spacer(),
               if (canCancel)
                 TextButton(
@@ -168,6 +176,80 @@ class MeetingCard extends StatelessWidget {
                   ),
                 ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class PastMeetingCard extends StatelessWidget {
+  const PastMeetingCard({super.key, required this.meeting, required this.onRecordings});
+
+  final ScopedMeeting meeting;
+  final VoidCallback onRecordings;
+
+  @override
+  Widget build(BuildContext context) {
+    final start = meeting.scheduledStartTime;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: orgCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: orgBorder),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  meeting.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Icon(meetingScopeIcon(meeting.scope), color: orgMuted, size: 15),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        meeting.scopeLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: orgMuted, fontSize: 12.5),
+                      ),
+                    ),
+                  ],
+                ),
+                if (start != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    meetingStartLabel(context, start),
+                    style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            height: 38,
+            child: FilledButton.icon(
+              onPressed: onRecordings,
+              icon: const Icon(Icons.video_library_outlined, size: 18, color: Colors.white),
+              label: const Text('Recordings', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+              style: FilledButton.styleFrom(
+                backgroundColor: orgAccent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
           ),
         ],
       ),

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:quorum_app/api/ai_service.dart';
@@ -52,6 +53,7 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
   bool get _pending => _pendingModes.contains(_mode);
 
   AiMode _mode = AiMode.chat;
+  bool _headerVisible = true;
   AiScope _scope = AiScope.organization;
   String _timeframe = 'last_7_days';
   String _replyMode = 'replies';
@@ -326,7 +328,9 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
   }) => const SizedBox.shrink();
 
   Widget _modeBar() {
-    return SizedBox(
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: SizedBox(
       height: 52,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
@@ -343,7 +347,7 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
             }),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 180),
-              padding: const EdgeInsets.symmetric(horizontal: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: selected ? AppColors.primary : Colors.transparent,
@@ -374,6 +378,7 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
             ),
           );
         },
+      ),
       ),
     );
   }
@@ -624,8 +629,17 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
 
     return SafeArea(
       top: false,
+      bottom: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        padding: EdgeInsets.fromLTRB(
+          12,
+          8,
+          12,
+          8 +
+              (MediaQuery.of(context).viewInsets.bottom > 0
+                  ? 0
+                  : MediaQuery.of(context).padding.bottom),
+        ),
         decoration: BoxDecoration(
           color: AppColors.surface,
           border: _configPanelVisible ? null : const Border(top: BorderSide(color: AppColors.surfaceBorder)),
@@ -665,7 +679,7 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
                           tooltip: 'Attach files',
                           onPressed: (_pending || _attachments.length >= aiMaxFiles) ? null : _pickAttachment,
                           icon: Icon(
-                            Icons.attach_file_rounded,
+                            Icons.add,
                             color: (_pending || _attachments.length >= aiMaxFiles)
                                 ? AppColors.textMuted
                                 : AppColors.textSecondary,
@@ -695,7 +709,7 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
                               hintStyle: const TextStyle(color: AppColors.textSecondary),
                               border: InputBorder.none,
                               isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                              contentPadding: const EdgeInsets.symmetric(vertical: 8),
                             ),
                           ),
                         ),
@@ -724,6 +738,16 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
 
   bool get _configPanelVisible => _mode != AiMode.search || _formError != null;
 
+  bool _onScrollDirection(UserScrollNotification n) {
+    if (n.depth != 0) return false;
+    if (n.direction == ScrollDirection.reverse && _headerVisible) {
+      setState(() => _headerVisible = false);
+    } else if (n.direction == ScrollDirection.forward && !_headerVisible) {
+      setState(() => _headerVisible = true);
+    }
+    return false;
+  }
+
   void _openHistory() {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const AiHistoryScreen()),
@@ -734,38 +758,57 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: darkBg,
-      appBar: AppBar(
-        backgroundColor: darkBg,
-        elevation: 0,
-        title: const Text(
-          'AI Assistant',
-          style: TextStyle(
-            color: AppColors.textPrimary,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Clear conversation',
-            icon: const Icon(Icons.delete_sweep_outlined, color: AppColors.textPrimary),
-            onPressed: (_turns.isEmpty || _pending)
-                ? null
-                : () => setState(() => _turnsByMode[_mode]!.clear()),
-          ),
-          IconButton(
-            tooltip: 'History',
-            icon: const Icon(Icons.history, color: AppColors.textPrimary),
-            onPressed: _openHistory,
-          ),
-        ],
-      ),
-      body: Column(
+      body: SafeArea(
+        bottom: false,
+        child: Column(
         children: [
+          ClipRect(
+            child: AnimatedAlign(
+              alignment: Alignment.topCenter,
+              heightFactor: _headerVisible ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOut,
+              child: SizedBox(
+                height: 56,
+                child: Row(
+                  children: [
+                    const SizedBox(width: 16),
+                    const Expanded(
+                      child: Text(
+                        'AI Assistant',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Clear conversation',
+                      icon: const Icon(Icons.delete_sweep_outlined, color: AppColors.textPrimary),
+                      onPressed: (_turns.isEmpty || _pending)
+                          ? null
+                          : () => setState(() => _turnsByMode[_mode]!.clear()),
+                    ),
+                    IconButton(
+                      tooltip: 'History',
+                      icon: const Icon(Icons.history, color: AppColors.textPrimary),
+                      onPressed: _openHistory,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
           _modeBar(),
           Expanded(
             child: _turns.isEmpty
                 ? _emptyState()
-                : ListView.builder(
+                : NotificationListener<UserScrollNotification>(
+                    onNotification: _onScrollDirection,
+                    child: ListView.builder(
                     key: ValueKey(_mode),
                     controller: _scrollCtrl,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -786,10 +829,12 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
                       );
                     },
                   ),
+                  ),
           ),
           _configPanel(),
           _inputBar(),
         ],
+        ),
       ),
     );
   }

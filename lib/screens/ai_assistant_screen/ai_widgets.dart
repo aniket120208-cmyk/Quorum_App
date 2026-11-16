@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:quorum_app/api/deep_link_router.dart';
 import 'package:quorum_app/models/ai_model.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
 
@@ -207,14 +208,9 @@ class UserPromptBubble extends StatelessWidget {
         constraints: BoxConstraints(
           maxWidth: MediaQuery.of(context).size.width * 0.8,
         ),
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           color: AppColors.primary,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
-            bottomLeft: Radius.circular(16),
-            bottomRight: Radius.circular(4),
-          ),
+          borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
@@ -261,6 +257,15 @@ class UserPromptBubble extends StatelessWidget {
                   style: const TextStyle(color: Colors.white70, fontSize: 11),
                 ),
               ),
+            if (text.isNotEmpty)
+              InkWell(
+                onTap: () => copyText(context, text),
+                borderRadius: BorderRadius.circular(8),
+                child: const Padding(
+                  padding: EdgeInsets.fromLTRB(6, 6, 0, 0),
+                  child: Icon(Icons.copy_rounded, size: 14, color: Colors.white70),
+                ),
+              ),
           ],
         ),
       ),
@@ -285,12 +290,7 @@ class AiResponseCard extends StatelessWidget {
         ),
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(4),
-            topRight: Radius.circular(16),
-            bottomLeft: Radius.circular(16),
-            bottomRight: Radius.circular(16),
-          ),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.surfaceBorder),
         ),
         child: _content(context),
@@ -464,15 +464,7 @@ class AiResponseCard extends StatelessWidget {
       children.add(const SizedBox(height: 8));
       children.add(Row(
         children: [
-          if (r.meta != null && r.meta!.model.isNotEmpty)
-            Expanded(
-              child: Text(
-                r.meta!.model,
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
-              ),
-            )
-          else
-            const Spacer(),
+          const Spacer(),
           InkWell(
             onTap: () => copyText(context, r.answer),
             borderRadius: BorderRadius.circular(8),
@@ -688,6 +680,7 @@ class SourceTile extends StatelessWidget {
   Future<void> _open(BuildContext context) async {
     final uri = Uri.tryParse(source.url ?? '');
     if (uri == null) return;
+    if (await DeepLinkRouter.tryOpen(uri)) return;
     final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!ok && context.mounted) showErrorSnack(context, 'Could not open this link');
   }
