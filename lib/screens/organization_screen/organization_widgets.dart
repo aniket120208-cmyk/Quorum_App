@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:quorum_app/models/organization_models.dart';
+import 'package:quorum_app/widgets/presence_widgets.dart';
 
 const Color orgBg = Color(0xFF090A10);
 const Color orgCard = Color(0xFF14151F);
@@ -20,6 +22,7 @@ class OrgAvatar extends StatelessWidget {
     this.localPath,
     this.size = 44,
     this.circular = false,
+    this.presenceUserId,
   });
 
   final String name;
@@ -27,6 +30,7 @@ class OrgAvatar extends StatelessWidget {
   final String? localPath;
   final double size;
   final bool circular;
+  final String? presenceUserId;
 
   Widget _initial() {
     final trimmed = name.trim();
@@ -34,7 +38,7 @@ class OrgAvatar extends StatelessWidget {
       alignment: Alignment.center,
       color: const Color(0xFF7C5CFC),
       child: Text(
-        trimmed.isNotEmpty ? trimmed[0].toUpperCase() : '?',
+        trimmed.isNotEmpty ? trimmed[0].toUpperCase() : '',
         style: TextStyle(
           color: Colors.white,
           fontSize: size * 0.42,
@@ -60,10 +64,13 @@ class OrgAvatar extends StatelessWidget {
     } else {
       child = _initial();
     }
-    return ClipRRect(
+    final avatar = ClipRRect(
       borderRadius: BorderRadius.circular(circular ? size / 2 : size * 0.3),
       child: SizedBox(width: size, height: size, child: child),
     );
+    final id = presenceUserId;
+    if (id == null || id.isEmpty) return avatar;
+    return PresenceWrap(userId: id, avatarSize: size, ringColor: orgCard, child: avatar);
   }
 }
 
@@ -76,12 +83,15 @@ class OrgRoleBadge extends StatelessWidget {
     final Color color;
     final String label;
     switch (role) {
-      case 'ORG_ADMIN':
+      case 'OWNER':
         color = const Color(0xFFF59E0B);
+        label = 'Owner';
+      case 'LEAD':
+        color = const Color(0xFF10B981);
+        label = 'Team head';
+      case 'ORG_ADMIN':
+        color = const Color(0xFF3B82F6);
         label = 'Admin';
-      case 'TEAM_HEAD':
-        color = orgTeal;
-        label = 'Team Head';
       default:
         color = orgMuted;
         label = 'Member';
@@ -243,3 +253,52 @@ Future<bool> orgConfirm(
 const RoundedRectangleBorder orgSheetShape = RoundedRectangleBorder(
   borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
 );
+class OrgListTile extends StatelessWidget {
+  const OrgListTile({super.key, required this.organization, required this.onTap});
+
+  final Organization organization;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final org = organization;
+    final members = '${org.membersCount} ${org.membersCount == 1 ? 'member' : 'members'}';
+    final teams = '${org.teamsCount} ${org.teamsCount == 1 ? 'team' : 'teams'}';
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: orgCard,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: orgBorder),
+        ),
+        child: Row(
+          children: [
+            OrgAvatar(name: org.name, logo: org.logo, size: 46),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    org.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 3),
+                  Text('$members · $teams', style: const TextStyle(color: orgMuted, fontSize: 12)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            OrgRoleBadge(role: org.role),
+            const SizedBox(width: 6),
+            const Icon(Icons.chevron_right_rounded, color: orgMuted, size: 22),
+          ],
+        ),
+      ),
+    );
+  }
+}

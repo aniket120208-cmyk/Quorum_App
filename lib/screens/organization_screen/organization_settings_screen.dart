@@ -3,6 +3,9 @@ import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/models/organization_models.dart';
 import 'package:quorum_app/widgets/copyable_id_tile.dart';
+import 'org_ownership_sheets.dart';
+import 'organization_invites_screen.dart';
+import 'organization_sheets.dart';
 import 'organization_widgets.dart';
 
 class OrganizationSettingsScreen extends StatefulWidget {
@@ -18,6 +21,42 @@ class _OrganizationSettingsScreenState extends State<OrganizationSettingsScreen>
   final _repo = OrganizationRepository.instance;
   bool _busy = false;
   Organization get _org => widget.organization;
+  bool get _isOwner => orgIsOwner(_org.role);
+
+  Future<void> _invite() async {
+    await showOrgSheet<void>(context, InviteSheet(organization: _org));
+  }
+
+  Future<void> _openInvites() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => OrganizationInvitesScreen(organization: _org)),
+    );
+  }
+
+  Future<void> _transferOwnership() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    List<OrgMember> members;
+    try {
+      members = await _repo.members(_org.id);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _busy = false);
+        orgToast(context, errorText(e), error: true);
+      }
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    final result = await showOrgSheet<OwnershipTransferResult>(
+      context,
+      TransferOwnershipSheet(organization: _org, members: members),
+    );
+    if (result == null || !mounted) return;
+    orgToast(context, result.message);
+    Navigator.pop(context, result.leftOrganization);
+  }
 
   Future<void> _leave() async {
     if (_busy) return;
@@ -162,19 +201,72 @@ class _OrganizationSettingsScreenState extends State<OrganizationSettingsScreen>
               ),
             ],
           ),
+          if (orgCanInvite(_org.role)) ...[
+            const SizedBox(height: 14),
+            _section(
+              title: 'People',
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: ElevatedButton.icon(
+                    onPressed: _invite,
+                    icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
+                    label: const Text('Invite people', style: TextStyle(fontWeight: FontWeight.w600)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: orgAccent,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: OutlinedButton.icon(
+                    onPressed: _openInvites,
+                    icon: const Icon(Icons.link_rounded, size: 18, color: orgTeal),
+                    label: const Text(
+                      'Manage invites',
+                      style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: orgBorder),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 14),
-          _section(
-            title: 'Leave organization',
-            children: [
-              const Text(
-                'You will lose access to its teams, tasks and chats. You can rejoin only with a new invite.',
-                style: TextStyle(color: orgMuted, fontSize: 13, height: 1.4),
-              ),
-              const SizedBox(height: 14),
-              _dangerButton(label: 'Leave organization', onPressed: _leave, filled: false),
-            ],
-          ),
-          if (orgIsAdmin(_org.role)) ...[
+          if (_isOwner)
+            _section(
+              title: 'Transfer ownership',
+              children: [
+                const Text(
+                  'You are the primary owner. Hand over ownership to another member before you can step down or leave. You can stay on as an admin or exit the organization.',
+                  style: TextStyle(color: orgMuted, fontSize: 13, height: 1.4),
+                ),
+                const SizedBox(height: 14),
+                _dangerButton(label: 'Transfer ownership', onPressed: _transferOwnership, filled: false),
+              ],
+            )
+          else
+            _section(
+              title: 'Leave organization',
+              children: [
+                const Text(
+                  'You will lose access to its teams, tasks and chats. You can rejoin only with a new invite.',
+                  style: TextStyle(color: orgMuted, fontSize: 13, height: 1.4),
+                ),
+                const SizedBox(height: 14),
+                _dangerButton(label: 'Leave organization', onPressed: _leave, filled: false),
+              ],
+            ),
+          if (_isOwner) ...[
             const SizedBox(height: 14),
             _section(
               title: 'Delete organization',

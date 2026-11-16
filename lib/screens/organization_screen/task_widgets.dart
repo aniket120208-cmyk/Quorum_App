@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:quorum_app/models/organization_models.dart';
+import 'package:quorum_app/screens/profile_screen/user_profile_screen.dart';
 import 'organization_widgets.dart';
 
 Color taskStatusColor(TaskStatus status) {
@@ -128,13 +129,19 @@ class TaskCard extends StatelessWidget {
                   task.isOverdue ? const Color(0xFFEF4444) : orgMuted,
                 ),
               if (task.assignee != null)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    OrgAvatar(name: task.assignee!.name, logo: task.assignee!.avatar, size: 20, circular: true),
-                    const SizedBox(width: 6),
-                    Text(task.assignee!.name, style: const TextStyle(color: orgMuted, fontSize: 12)),
-                  ],
+                ProfileTap(
+                  userId: task.assignee!.id,
+                  name: task.assignee!.name,
+                  email: task.assignee!.email,
+                  avatarUrl: task.assignee!.avatar,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      OrgAvatar(name: task.assignee!.name, logo: task.assignee!.avatar, size: 20, circular: true),
+                      const SizedBox(width: 6),
+                      Text(task.assignee!.name, style: const TextStyle(color: orgMuted, fontSize: 12)),
+                    ],
+                  ),
                 )
               else if (task.createdBy != null)
                 Text('From ${task.createdBy!.name}', style: const TextStyle(color: orgMuted, fontSize: 12)),

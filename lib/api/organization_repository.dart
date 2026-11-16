@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:quorum_app/api/api_client.dart';
 import 'package:quorum_app/api/api_exception.dart';
+import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/models/organization_models.dart';
 
 class OrganizationRepository {
@@ -48,9 +49,46 @@ class OrganizationRepository {
     return const [];
   }
 
-  Future<List<Organization>> organizations() => _guard(() async {
-        final r = await _dio.get('/api/organizations');
-        return _list(_data(r), 'organizations').map((e) => Organization.fromJson(_map(e))).toList();
+  final Map<String, ({bool owner, DateTime at})> _ownerCache = {};
+
+  Future<Organization> _resolveOwner(Organization org) async {
+    if (!org.isMember || org.role != 'ORG_ADMIN' || !CurrentUser.isLoaded) return org;
+    final cached = _ownerCache[org.id];
+    if (cached != null && DateTime.now().difference(cached.at) < const Duration(minutes: 2)) {
+      return cached.owner ? org.copyWith(role: 'OWNER') : org;
+    }
+    try {
+      final people = await members(org.id);
+      final owner = people.any((m) => m.userId == CurrentUser.id && m.isOwner);
+      _ownerCache[org.id] = (owner: owner, at: DateTime.now());
+      return owner ? org.copyWith(role: 'OWNER') : org;
+    } catch (_) {
+      return org;
+    }
+  }
+
+  Future<List<Organization>> _resolveOwners(List<Organization> orgs) => Future.wait(orgs.map(_resolveOwner));
+
+  Future<List<Organization>> organizations({String? query, int? limit}) => _guard(() async {
+        final r = await _dio.get('/api/organizations', queryParameters: {
+          if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+          if (limit != null) 'limit': limit.clamp(1, 50),
+        });
+        return _resolveOwners(_list(_data(r), 'organizations').map((e) => Organization.fromJson(_map(e))).toList());
+      });
+
+  Future<List<Organization>> search({
+    String? query,
+    OrgSearchScope scope = OrgSearchScope.all,
+    int limit = 20,
+  }) =>
+      _guard(() async {
+        final r = await _dio.get('/api/organizations/search', queryParameters: {
+          if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+          'scope': scope == OrgSearchScope.all ? 'all' : 'my',
+          'limit': limit.clamp(1, 50),
+        });
+        return _resolveOwners(_list(_data(r), 'organizations').map((e) => Organization.fromJson(_map(e))).toList());
       });
 
   Future<Organization> create({
@@ -64,12 +102,12 @@ class OrganizationRepository {
           if (description != null && description.isNotEmpty) 'description': description,
           if (logo != null && logo.isNotEmpty) 'logo': logo,
         });
-        return Organization.fromJson(_map(_data(r)), fallbackRole: 'ORG_ADMIN');
+        return Organization.fromJson(_map(_data(r)), fallbackRole: 'OWNER');
       });
 
   Future<Organization> detail(String id, {required String role}) => _guard(() async {
         final r = await _dio.get('/api/organizations/$id');
-        return Organization.fromJson(_map(_data(r)), fallbackRole: role);
+        return _resolveOwner(Organization.fromJson(_map(_data(r)), fallbackRole: role));
       });
 
   Future<void> update(
@@ -103,7 +141,7 @@ class OrganizationRepository {
       });
 
   Future<List<OrgMember>> members(String id) => _guard(() async {
-        final r = await _dio.get('/api/organizations/$id/members');
+        final r = await _dio.get('/api/v1/organizations/$id/members');
         return _list(_data(r), 'members').map((e) => OrgMember.fromJson(_map(e))).toList();
       });
 
@@ -121,15 +159,28 @@ class OrganizationRepository {
     required String role,
     required int maxUses,
     required int expiresInDays,
+    String? teamId,
+    String? teamRole,
   }) =>
       _guard(() async {
         final r = await _dio.post('/api/organizations/$id/invites', data: {
           if (email != null && email.isNotEmpty) 'email': email,
           'role': role,
+          if (teamId != null && teamId.isNotEmpty) 'teamId': teamId,
+          if (teamId != null && teamId.isNotEmpty && teamRole != null) 'teamRole': teamRole,
           'maxUses': maxUses,
           'expiresInDays': expiresInDays,
         });
         return OrgInvite.fromJson(_map(_data(r)));
+      });
+
+  Future<List<OrgInvite>> invites(String id) => _guard(() async {
+        final r = await _dio.get('/api/organizations/$id/invites');
+        return _list(_data(r), 'invites').map((e) => OrgInvite.fromJson(_map(e))).toList();
+      });
+
+  Future<void> revokeInvite(String id, String inviteId) => _guard(() async {
+        await _dio.delete('/api/organizations/$id/invites/$inviteId');
       });
 
   Future<InvitePreview> previewInvite(String token) => _guard(() async {
@@ -156,8 +207,19 @@ class OrganizationRepository {
         });
       });
 
-  Future<void> addTeamMember(String id, String teamId, String userId) => _guard(() async {
-        await _dio.post('/api/organizations/$id/teams/$teamId/members', data: {'userId': userId});
+  Future<void> updateTeam(String id, String teamId, {required String name, required String description}) =>
+      _guard(() async {
+        await _dio.patch('/api/organizations/$id/teams/$teamId', data: {
+          'name': name,
+          'description': description,
+        });
+      });
+
+  Future<void> addTeamMember(String id, String teamId, String userId, {String? teamRole}) => _guard(() async {
+        await _dio.post('/api/organizations/$id/teams/$teamId/members', data: {
+          'userId': userId,
+          if (teamRole != null && teamRole.isNotEmpty) 'teamRole': teamRole,
+        });
       });
 
   Future<void> removeTeamMember(String id, String teamId, String userId) => _guard(() async {
@@ -206,8 +268,46 @@ class OrganizationRepository {
       });
 
   Future<List<OrgMember>> teamMembers(String id, String teamId) => _guard(() async {
-        final r = await _dio.get('/api/organizations/$id/teams/$teamId');
+        Response r;
+        try {
+          r = await _dio.get('/api/v1/organizations/$id/teams/$teamId/members');
+        } on DioException catch (e) {
+          if (e.response?.statusCode != 404) rethrow;
+          r = await _dio.get('/api/organizations/$id/teams/$teamId');
+        }
         return _list(_data(r), 'members').map((e) => OrgMember.fromJson(_map(e))).toList();
+      });
+
+  String _message(Response r, String fallback) {
+    final body = r.data;
+    final m = body is Map ? body['message']?.toString() : null;
+    return m == null || m.isEmpty ? fallback : m;
+  }
+
+  Future<String> leaveTeam(String id, String teamId) => _guard(() async {
+        final r = await _dio.post(
+          '/api/v1/organizations/$id/teams/$teamId/leave',
+          data: <String, dynamic>{},
+        );
+        return _message(r, 'You left the team');
+      });
+
+  Future<String> transferLeadAndLeave(String id, String teamId, String successorId) => _guard(() async {
+        final r = await _dio.post(
+          '/api/v1/organizations/$id/teams/$teamId/transfer-lead-and-leave',
+          data: {'successorId': successorId},
+        );
+        return _message(r, 'Leadership transferred. You have exited the team.');
+      });
+
+  Future<String> transferOwnership(String id, String newOwnerId, {bool leaveOrganization = false}) =>
+      _guard(() async {
+        final r = await _dio.post(
+          '/api/v1/organizations/$id/transfer-ownership',
+          data: {'newOwnerId': newOwnerId, 'leaveOrganization': leaveOrganization},
+        );
+        _ownerCache.remove(id);
+        return _message(r, 'Ownership transferred');
       });
 
   Future<List<TeamTask>> teamTasks(String id, String teamId) => _guard(() async {

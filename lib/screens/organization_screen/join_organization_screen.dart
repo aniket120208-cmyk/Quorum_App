@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/models/organization_models.dart';
+import 'discover_organizations_screen.dart';
 import 'organization_widgets.dart';
 
 class JoinOrganizationScreen extends StatefulWidget {
@@ -122,6 +123,29 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                 loading: _checking,
                 onPressed: _ctrl.text.trim().isEmpty ? null : _lookup,
               ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final joined = await Navigator.push<bool>(
+                      context,
+                      MaterialPageRoute(builder: (_) => const DiscoverOrganizationsScreen()),
+                    );
+                    if (joined == true && mounted) Navigator.pop(context, true);
+                  },
+                  icon: const Icon(Icons.travel_explore_rounded, size: 18, color: orgTeal),
+                  label: const Text(
+                    'Browse organizations',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: orgBorder),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+              ),
               if (preview != null) ...[
                 const SizedBox(height: 28),
                 Container(
@@ -146,6 +170,14 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                         '${preview.membersCount} ${preview.membersCount == 1 ? 'member' : 'members'}',
                         style: const TextStyle(color: orgMuted, fontSize: 13),
                       ),
+                      if (preview.organizationDescription != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          preview.organizationDescription!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: orgMuted, fontSize: 13, height: 1.4),
+                        ),
+                      ],
                       const SizedBox(height: 14),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -154,11 +186,34 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                           OrgRoleBadge(role: preview.role),
                         ],
                       ),
+                      if (preview.teamName != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Team: ${preview.teamName} (${orgTeamRoleLabel(preview.teamRole ?? 'MEMBER')})',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: orgMuted, fontSize: 13),
+                        ),
+                      ],
                       if (preview.inviterName != null) ...[
                         const SizedBox(height: 8),
                         Text(
                           'Invited by ${preview.inviterName}',
                           style: const TextStyle(color: orgMuted, fontSize: 13),
+                        ),
+                      ],
+                      if (preview.restrictedEmail != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'For ${preview.restrictedEmail}. Sign in with this email to accept.',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: orgMuted, fontSize: 12.5),
+                        ),
+                      ],
+                      if (preview.expiresAt != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Expires ${preview.expiresAt!.day}/${preview.expiresAt!.month}/${preview.expiresAt!.year}',
+                          style: const TextStyle(color: orgMuted, fontSize: 12),
                         ),
                       ],
                       const SizedBox(height: 20),

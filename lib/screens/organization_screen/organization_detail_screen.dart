@@ -4,20 +4,32 @@ import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/models/organization_models.dart';
-import 'package:quorum_app/widgets/copyable_id_tile.dart';
+import 'package:quorum_app/widgets/id_dialog.dart';
+import 'package:quorum_app/screens/office_screen/virtual_office_screen.dart';
+import 'package:quorum_app/screens/project_screen/projects_list_screen.dart';
+import 'package:quorum_app/screens/profile_screen/user_profile_screen.dart';
+import 'org_feed_tab.dart';
+import 'org_ownership_sheets.dart';
 import 'organization_sheets.dart';
 import 'organization_widgets.dart';
+import 'package:quorum_app/widgets/presence_widgets.dart';
 import 'my_tasks_screen.dart';
 import 'team_chat_screen.dart';
 import 'team_tasks_screen.dart';
+import 'organization_profile_screen.dart';
 import 'organization_settings_screen.dart';
 import 'package:quorum_app/screens/jira_screen/jira_settings_screen.dart';
+import 'package:quorum_app/screens/jira_screen/team_jira_board_screen.dart';
+import 'package:quorum_app/screens/github_screen/team_github_screen.dart';
 import 'package:quorum_app/screens/meetings_screen/meetings_list_screen.dart';
 import 'package:quorum_app/screens/whiteboard_screen/whiteboard_list_screen.dart';
+import 'package:quorum_app/screens/document_screen/document_list_screen.dart';
+import 'package:quorum_app/models/document_models.dart';
 
 class OrganizationDetailScreen extends StatefulWidget {
-  const OrganizationDetailScreen({super.key, required this.organization});
+  const OrganizationDetailScreen({super.key, required this.organization, this.initialTab = 0});
   final Organization organization;
+  final int initialTab;
 
   @override
   State<OrganizationDetailScreen> createState() => _OrganizationDetailScreenState();
@@ -25,6 +37,8 @@ class OrganizationDetailScreen extends StatefulWidget {
 
 class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
   final _repo = OrganizationRepository.instance;
+  final _memberSearch = TextEditingController();
+  String _memberQuery = '';
   late Organization _org = widget.organization;
   List<OrgMember> _members = const [];
   List<OrgTeam> _teams = const [];
@@ -46,6 +60,7 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
   @override
   void dispose() {
     _poller?.cancel();
+    _memberSearch.dispose();
     super.dispose();
   }
 
@@ -53,7 +68,8 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
     return Future.wait(teams.map((team) async {
       try {
         final people = await _repo.teamMembers(_org.id, team.id);
-        return team.copyWith(membersCount: people.length);
+        final joined = people.any((m) => m.userId.isNotEmpty && m.userId == CurrentUser.id);
+        return team.copyWith(membersCount: people.length, isMember: joined);
       } catch (_) {
         return team;
       }
@@ -128,8 +144,15 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
     }
   }
 
-  Future<void> _invite() async {
-    await showOrgSheet<void>(context, InviteSheet(organization: _org));
+  Future<void> _editTeam(OrgTeam team) async {
+    final saved = await showOrgSheet<bool>(
+      context,
+      EditTeamSheet(organizationId: _org.id, team: team),
+    );
+    if (saved == true) {
+      await _load();
+      if (mounted) orgToast(context, 'Team updated');
+    }
   }
 
   Future<void> _createTeam() async {
@@ -141,6 +164,10 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
   }
 
   Future<void> _openChat(OrgTeam team) async {
+    if (!team.isMember) {
+      orgToast(context, 'Only members of this team can open its chat', error: true);
+      return;
+    }
     await Navigator.push(
       context,
       MaterialPageRoute(
@@ -158,6 +185,101 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => TeamTasksScreen(organization: _org, team: team),
+      ),
+    );
+  }
+
+  Future<void> _openOffice(OrgTeam team) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VirtualOfficeScreen(organization: _org, teams: _teams, initialTeam: team),
+      ),
+    );
+  }
+
+  Future<void> _openTeamJira(OrgTeam team) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TeamJiraBoardScreen(organization: _org, team: team),
+      ),
+    );
+  }
+
+  Future<void> _openTeamGithub(OrgTeam team) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TeamGithubScreen(organization: _org, team: team),
+      ),
+    );
+  }
+
+  Future<void> _transferLeadAndLeave(OrgTeam team, List<OrgMember> people, {String? prompt}) async {
+    final message = await showOrgSheet<String>(
+      context,
+      TransferLeadSheet(organization: _org, team: team, members: people, prompt: prompt),
+    );
+    if (message == null || !mounted) return;
+    await _load();
+    if (mounted) orgToast(context, message);
+  }
+
+  Future<void> _leaveTeam(OrgTeam team) async {
+    try {
+      final people = await _repo.teamMembers(_org.id, team.id);
+      if (!mounted) return;
+      final mine = people.where((m) => m.userId == CurrentUser.id);
+      if (mine.isEmpty) {
+        orgToast(context, 'You are not a member of ${team.name}', error: true);
+        return;
+      }
+      final leads = people.where((m) => m.isTeamLead).length;
+      if (mine.first.isTeamLead && leads <= 1) {
+        await _transferLeadAndLeave(team, people);
+        return;
+      }
+      final ok = await orgConfirm(
+        context,
+        title: 'Leave team',
+        body: 'Leave ${team.name}? You will lose access to its chat and tasks.',
+        action: 'Leave',
+      );
+      if (!ok || !mounted) return;
+      try {
+        final message = await _repo.leaveTeam(_org.id, team.id);
+        await _load();
+        if (mounted) orgToast(context, message);
+      } on ApiException catch (e) {
+        if (e.statusCode == 400 && e.message.toLowerCase().contains('sole')) {
+          if (!mounted) return;
+          await _transferLeadAndLeave(
+            team,
+            people,
+            prompt: 'You are the sole team head of this team. Please select a successor before leaving.',
+          );
+          return;
+        }
+        rethrow;
+      }
+    } catch (e) {
+      if (mounted) orgToast(context, errorText(e), error: true);
+    }
+  }
+
+  Future<void> _openProfile() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => OrganizationProfileScreen(organization: _org)),
+    );
+  }
+
+  Future<void> _openProjects() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProjectsListScreen(organization: _org),
       ),
     );
   }
@@ -208,6 +330,19 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
     );
   }
 
+  Future<void> _openDocuments() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DocumentListScreen(
+          title: '${_org.name} documents',
+          scope: DocumentScope.organization,
+          organizationId: _org.id,
+        ),
+      ),
+    );
+  }
+
   Future<void> _openWhiteboards() async {
     await Navigator.push(
       context,
@@ -218,14 +353,20 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
   }
 
   Future<void> _addToTeam(OrgTeam team) async {
-    final member = await showOrgSheet<OrgMember>(
+    var joinedIds = <String>{};
+    try {
+      final current = await _repo.teamMembers(_org.id, team.id);
+      joinedIds = {for (final m in current) m.userId};
+    } catch (_) {}
+    if (!mounted) return;
+    final picked = await showOrgSheet<TeamMemberSelection>(
       context,
-      MemberPickerSheet(title: 'Add to ${team.name}', members: _members),
+      AddTeamMemberSheet(title: 'Add to ${team.name}', members: _members, joinedIds: joinedIds),
     );
-    if (member == null) return;
+    if (picked == null) return;
     await _run(
-      () => _repo.addTeamMember(_org.id, team.id, member.userId),
-      '${member.name} added to ${team.name}',
+      () => _repo.addTeamMember(_org.id, team.id, picked.member.userId, teamRole: picked.teamRole),
+      '${picked.member.name} added to ${team.name}',
     );
   }
 
@@ -255,7 +396,29 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
         backgroundColor: orgBg,
         elevation: 0,
         foregroundColor: Colors.white,
-        title: const Text('Organization', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+        scrolledUnderElevation: 0,
+        titleSpacing: 0,
+        title: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: _openProfile,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                OrgAvatar(name: _org.name, logo: _org.logo, size: 36, circular: true),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    _org.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
         actions: [
           if (!_loading && _error == null && orgIsAdmin(_org.role))
             IconButton(onPressed: _edit, icon: const Icon(Icons.edit_outlined)),
@@ -272,7 +435,8 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
           : _error != null
               ? _errorView()
               : DefaultTabController(
-                  length: 2,
+                  length: 3,
+                  initialIndex: widget.initialTab.clamp(0, 2),
                   child: Column(
                     children: [
                       _header(),
@@ -285,10 +449,17 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
                         tabs: [
                           Tab(text: 'Members (${_members.length})'),
                           Tab(text: 'Teams (${_teams.length})'),
+                          const Tab(text: 'Feed'),
                         ],
                       ),
                       Expanded(
-                        child: TabBarView(children: [_membersTab(), _teamsTab()]),
+                        child: TabBarView(
+                          children: [
+                            _membersTab(),
+                            _teamsTab(),
+                            OrgFeedTab(organization: _org, members: _members, teams: _teams),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -325,113 +496,44 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
 
   Widget _header() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+
           Row(
             children: [
-              OrgAvatar(name: _org.name, logo: _org.logo, size: 64),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _org.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 6),
-                    OrgRoleBadge(role: _org.role),
-                  ],
-                ),
-              ),
+              _quickAction(Icons.task_alt_rounded, 'My tasks', _openMyTasks),
+              const SizedBox(width: 10),
+              _quickAction(Icons.handshake_outlined, 'Projects & collaborators', _openProjects),
+              const SizedBox(width: 10),
+              _quickAction(Icons.draw_rounded, 'Whiteboards', _openWhiteboards),
+              const SizedBox(width: 10),
+              _quickAction(Icons.description_outlined, 'Documents', _openDocuments),
             ],
           ),
-          if (_org.description != null) ...[
-            const SizedBox(height: 14),
-            Text(
-              _org.description!,
-              style: const TextStyle(color: orgMuted, fontSize: 13, height: 1.4),
-            ),
-          ],
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            height: 46,
-            child: OutlinedButton.icon(
-              onPressed: _openMyTasks,
-              icon: const Icon(Icons.task_alt_rounded, size: 18, color: orgTeal),
-              label: const Text('My tasks', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: orgBorder),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            height: 46,
-            child: OutlinedButton.icon(
-              onPressed: _openWhiteboards,
-              icon: const Icon(Icons.draw_rounded, size: 18, color: orgTeal),
-              label: const Text('Whiteboards', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: orgBorder),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            height: 46,
-            child: OutlinedButton.icon(
-              onPressed: _openJira,
-              icon: const Icon(Icons.view_kanban_outlined, size: 18, color: orgTeal),
-              label: const Text('Jira integration', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: orgBorder),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            height: 46,
-            child: OutlinedButton.icon(
-              onPressed: _openMeetings,
-              icon: const Icon(Icons.videocam_outlined, size: 18, color: orgTeal),
-              label: const Text('Meetings', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: orgBorder),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-            ),
-          ),
-          if (orgCanInvite(_org.role)) ...[
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              height: 46,
-              child: ElevatedButton.icon(
-                onPressed: _invite,
-                icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
-                label: const Text('Invite people', style: TextStyle(fontWeight: FontWeight.w600)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: orgAccent,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-              ),
-            ),
-          ],
         ],
+      ),
+    );
+  }
+
+  Widget _quickAction(IconData icon, String tooltip, VoidCallback onTap) {
+    return Expanded(
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Container(
+            height: 38,
+            decoration: BoxDecoration(
+              color: orgCard,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: orgBorder),
+            ),
+            child: Icon(icon, size: 20, color: orgTeal),
+          ),
+        ),
       ),
     );
   }
@@ -446,27 +548,104 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
     );
   }
 
+  List<OrgMember> get _filteredMembers {
+    final q = _memberQuery.trim().toLowerCase();
+    final base = q.isEmpty
+        ? [..._members]
+        : _members
+            .where((m) =>
+                m.name.toLowerCase().contains(q) ||
+                (m.email ?? '').toLowerCase().contains(q) ||
+                orgRoleLabel(m.role).toLowerCase().contains(q))
+            .toList();
+    final ranked = [for (var i = 0; i < base.length; i++) (i, base[i])]
+      ..sort((a, b) {
+        final byRole = orgRoleRank(a.$2.role).compareTo(orgRoleRank(b.$2.role));
+        return byRole != 0 ? byRole : a.$1.compareTo(b.$1);
+      });
+    return [for (final e in ranked) e.$2];
+  }
+
+  Widget _memberSearchField() {
+    OutlineInputBorder border(Color c) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: c),
+        );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      child: TextField(
+        controller: _memberSearch,
+        onChanged: (v) => setState(() => _memberQuery = v),
+        textInputAction: TextInputAction.search,
+        style: const TextStyle(color: Colors.white, fontSize: 14),
+        cursorColor: orgTeal,
+        decoration: InputDecoration(
+          hintText: 'Search members',
+          hintStyle: const TextStyle(color: Color(0xFF5A5E6B)),
+          prefixIcon: const Icon(Icons.search_rounded, color: orgMuted, size: 20),
+          suffixIcon: _memberQuery.isEmpty
+              ? null
+              : IconButton(
+                  onPressed: () {
+                    _memberSearch.clear();
+                    setState(() => _memberQuery = '');
+                  },
+                  icon: const Icon(Icons.close_rounded, color: orgMuted, size: 18),
+                ),
+          filled: true,
+          fillColor: orgField,
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          border: border(orgBorder),
+          enabledBorder: border(orgBorder),
+          focusedBorder: border(orgTeal),
+        ),
+      ),
+    );
+  }
+
   Widget _membersTab() {
-    return RefreshIndicator(
-      color: orgTeal,
-      backgroundColor: orgCard,
-      onRefresh: _load,
-      child: _members.isEmpty
-          ? _emptyList('No members yet')
-          : ListView.separated(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
-              itemCount: _members.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 10),
-              itemBuilder: (context, index) => _memberTile(_members[index]),
-            ),
+    final list = _filteredMembers;
+    return Column(
+      children: [
+        _memberSearchField(),
+        Expanded(
+          child: RefreshIndicator(
+            color: orgTeal,
+            backgroundColor: orgCard,
+            onRefresh: _load,
+            child: list.isEmpty
+                ? _emptyList(_members.isEmpty ? 'No members yet' : 'No members match your search')
+                : ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+                    itemCount: list.length,
+                    separatorBuilder: (context, index) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) => _memberTile(list[index]),
+                  ),
+          ),
+        ),
+      ],
     );
   }
 
   Widget _memberTile(OrgMember m) {
     final isMe = m.userId == CurrentUser.id;
-    final canManage = orgIsAdmin(_org.role) && !isMe;
-    return Container(
+    final canManage = orgIsAdmin(_org.role) && !isMe && !m.isOwner;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => openUserProfile(
+        context,
+        userId: m.userId,
+        name: m.name,
+        email: m.email,
+        avatarUrl: m.avatar,
+        role: m.role,
+        roleLabel: 'Organization role',
+        joinedAt: m.joinedAt,
+      ),
+      child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: orgCard,
@@ -475,7 +654,7 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
       ),
       child: Row(
         children: [
-          OrgAvatar(name: m.name, logo: m.avatar, size: 42, circular: true),
+          OrgAvatar(name: m.name, logo: m.avatar, size: 42, circular: true, presenceUserId: m.userId),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -487,13 +666,11 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
                 ),
-                if (m.email != null)
-                  Text(
-                    m.email!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: orgMuted, fontSize: 12),
-                  ),
+                PresenceLine(
+                  userId: m.userId,
+                  ringColor: orgCard,
+                  style: const TextStyle(color: orgMuted, fontSize: 12),
+                ),
               ],
             ),
           ),
@@ -511,7 +688,7 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
                 }
               },
               itemBuilder: (context) => [
-                for (final role in const ['ORG_ADMIN', 'TEAM_HEAD', 'MEMBER'])
+                for (final role in const ['ORG_ADMIN', 'MEMBER'])
                   if (role != m.role)
                     PopupMenuItem<String>(
                       value: role,
@@ -525,11 +702,12 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
             ),
         ],
       ),
+      ),
     );
   }
 
   Widget _teamsTab() {
-    final canManage = orgCanInvite(_org.role);
+    final canManage = orgIsAdmin(_org.role);
     return Scaffold(
       backgroundColor: Colors.transparent,
       floatingActionButton: canManage
@@ -566,83 +744,137 @@ class _OrganizationDetailScreenState extends State<OrganizationDetailScreen> {
     );
   }
 
+  Future<void> _showTeamId(OrgTeam team) {
+    return showIdDialog(
+      context,
+      title: team.name,
+      label: 'Team ID',
+      value: team.id,
+      background: orgCard,
+      titleColor: Colors.white,
+      mutedColor: orgMuted,
+      valueColor: Colors.white,
+      borderColor: orgBorder,
+      accentColor: orgTeal,
+    );
+  }
+
   Widget _teamTile(OrgTeam team, bool canManage) {
     return InkWell(
       borderRadius: BorderRadius.circular(16),
       onTap: () => _openChat(team),
       child: Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: orgCard,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: orgBorder),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF16302F),
-                  borderRadius: BorderRadius.circular(12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: orgCard,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: orgBorder),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                (team.avatar ?? '').isNotEmpty
+                    ? OrgAvatar(name: team.name, logo: team.avatar, size: 40)
+                    : Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF16302F),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.groups_rounded, color: orgTeal, size: 21),
+                      ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        team.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700),
+                      ),
+                      Text(
+                        '${team.membersCount} ${team.membersCount == 1 ? 'member' : 'members'}',
+                        style: const TextStyle(color: orgMuted, fontSize: 12),
+                      ),
+                    ],
+                  ),
                 ),
-                child: const Icon(Icons.groups_rounded, color: orgTeal, size: 21),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      team.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700),
-                    ),
-                    Text(
-                      '${team.membersCount} ${team.membersCount == 1 ? 'member' : 'members'}',
-                      style: const TextStyle(color: orgMuted, fontSize: 12),
-                    ),
+                PopupMenuButton<String>(
+                  color: orgCard,
+                  icon: const Icon(Icons.more_vert_rounded, color: orgMuted, size: 20),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  onSelected: (v) {
+                    switch (v) {
+                      case 'edit':
+                        _editTeam(team);
+                      case 'add':
+                        _addToTeam(team);
+                      case 'leave':
+                        _leaveTeam(team);
+                      case 'id':
+                        _showTeamId(team);
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    if (canManage)
+                      const PopupMenuItem(value: 'edit', child: Text('Edit team', style: TextStyle(color: Colors.white))),
+                    if (canManage)
+                      const PopupMenuItem(value: 'add', child: Text('Add member', style: TextStyle(color: Colors.white))),
+                    const PopupMenuItem(value: 'id', child: Text('Team ID', style: TextStyle(color: Colors.white))),
+                    const PopupMenuItem(value: 'leave', child: Text('Leave team', style: TextStyle(color: Color(0xFFEF4444)))),
                   ],
                 ),
-              ),
-              if (canManage)
-                IconButton(
-                  tooltip: 'Add member',
-                  onPressed: () => _addToTeam(team),
-                  icon: const Icon(Icons.person_add_alt_1_rounded, color: orgTeal, size: 20),
-                ),
-              IconButton(
-                onPressed: () => _openTasks(team),
-                icon: const Icon(Icons.task_alt_rounded, color: orgTeal, size: 20),
-              ),
-              IconButton(
-                onPressed: () => _openChat(team),
-                icon: const Icon(Icons.chat_bubble_outline_rounded, color: orgTeal, size: 20),
+              ],
+            ),
+            if (team.description != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                team.description!,
+                style: const TextStyle(color: orgMuted, fontSize: 12.5, height: 1.4),
               ),
             ],
-          ),
-          if (team.description != null) ...[
-            const SizedBox(height: 10),
-            Text(
-              team.description!,
-              style: const TextStyle(color: orgMuted, fontSize: 12.5, height: 1.4),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                IconButton(
+                  tooltip: 'Tasks',
+                  onPressed: () => _openTasks(team),
+                  icon: const Icon(Icons.task_alt_rounded, color: orgTeal, size: 22),
+                ),
+                IconButton(
+                  tooltip: 'Chat',
+                  onPressed: () => _openChat(team),
+                  icon: Icon(
+                    Icons.chat_bubble_outline_rounded,
+                    color: team.isMember ? orgTeal : orgMuted,
+                    size: 22,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Jira tickets',
+                  onPressed: () => _openTeamJira(team),
+                  icon: const Icon(Icons.confirmation_number_outlined, color: orgTeal, size: 22),
+                ),
+                IconButton(
+                  tooltip: 'GitHub',
+                  onPressed: () => _openTeamGithub(team),
+                  icon: const Icon(Icons.code_rounded, color: orgTeal, size: 22),
+                ),
+                IconButton(
+                  tooltip: 'Virtual office',
+                  onPressed: () => _openOffice(team),
+                  icon: const Icon(Icons.apartment_rounded, color: orgTeal, size: 22),
+                ),
+              ],
             ),
           ],
-          const SizedBox(height: 10),
-          CopyableIdTile(
-            label: 'Team ID',
-            value: team.id,
-            labelColor: orgMuted,
-            valueColor: Colors.white,
-            borderColor: orgBorder,
-            accentColor: orgTeal,
-          ),
-        ],
-      ),
+        ),
       ),
     );
   }
