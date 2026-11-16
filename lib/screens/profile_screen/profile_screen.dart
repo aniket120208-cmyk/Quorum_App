@@ -9,6 +9,9 @@ import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/meeting_history_store.dart';
 import 'package:quorum_app/api/notification_service.dart';
 import 'package:quorum_app/api/organization_repository.dart';
+import 'package:quorum_app/api/presence_service.dart';
+import 'package:quorum_app/widgets/presence_widgets.dart';
+import 'package:quorum_app/screens/profile_screen/set_status_sheet.dart';
 import 'package:quorum_app/api/user_service.dart';
 import 'package:quorum_app/models/calendar_models.dart';
 import 'package:quorum_app/models/organization_models.dart';
@@ -19,13 +22,12 @@ import 'package:quorum_app/screens/github_screen/github_settings_screen.dart';
 import 'package:quorum_app/screens/jira_screen/jira_settings_screen.dart';
 import 'package:quorum_app/screens/notification_screen/notification_preferences_screen.dart';
 import 'package:quorum_app/screens/notification_screen/notification_screen.dart';
+import 'package:quorum_app/screens/organization_screen/all_organizations_screen.dart';
 import 'package:quorum_app/screens/organization_screen/create_organization_screen.dart';
 import 'package:quorum_app/screens/organization_screen/join_organization_screen.dart';
 import 'package:quorum_app/screens/organization_screen/organization_detail_screen.dart';
 import 'package:quorum_app/screens/organization_screen/organization_widgets.dart';
 import 'package:quorum_app/screens/saved_items_screen/saved_items_screen.dart';
-import 'package:quorum_app/screens/document_screen/document_list_screen.dart';
-import 'package:quorum_app/models/document_models.dart';
 import 'package:quorum_app/screens/sign_in_screen/sign_in_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -158,11 +160,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return DateTime.tryParse(raw.toString())?.toLocal();
   }
 
-  bool get _verified =>
-      _profile['isEmailVerified'] == true ||
-      _profile['isVerified'] == true ||
-      _profile['emailVerified'] == true;
-
   List<String> get _useCases {
     final raw = _profile['useCases'];
     if (raw is! List) return const [];
@@ -199,8 +196,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Future<ImageSource?> _chooseAvatarSource() {
-    return showModalBottomSheet<ImageSource>(
+  Future<Object?> _chooseAvatarSource() {
+    return showModalBottomSheet<Object>(
       context: context,
       backgroundColor: orgCard,
       shape: orgSheetShape,
@@ -219,6 +216,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               title: const Text('Take a photo', style: TextStyle(color: Colors.white)),
               onTap: () => Navigator.pop(ctx, ImageSource.camera),
             ),
+            if (_avatar != null)
+              ListTile(
+                leading: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444)),
+                title: const Text('Remove photo', style: TextStyle(color: Color(0xFFEF4444))),
+                onTap: () => Navigator.pop(ctx, 'remove'),
+              ),
             const SizedBox(height: 8),
           ],
         ),
@@ -228,8 +231,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _changeAvatar() async {
     if (_uploadingAvatar) return;
-    final source = await _chooseAvatarSource();
-    if (source == null || !mounted) return;
+    final choice = await _chooseAvatarSource();
+    if (choice == null || !mounted) return;
+    if (choice == 'remove') {
+      await _removeAvatar();
+      return;
+    }
+    final source = choice as ImageSource;
     try {
       final picked = await ImagePicker().pickImage(
         source: source,
@@ -256,6 +264,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _uploadingAvatar = false;
         _localAvatarPath = null;
       });
+      CurrentUser.avatar = avatarFromJson(_profile);
       orgToast(context, 'Profile photo updated');
     } catch (e) {
       if (!mounted) return;
@@ -263,6 +272,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _uploadingAvatar = false;
         _localAvatarPath = null;
       });
+      orgToast(context, errorText(e), error: true);
+    }
+  }
+
+  Future<void> _removeAvatar() async {
+    setState(() => _uploadingAvatar = true);
+    try {
+      final user = await UserService.instance.removeAvatar();
+      if (!mounted) return;
+      final remaining = avatarFromJson(user);
+      if (remaining != null && remaining.isNotEmpty) {
+        setState(() => _uploadingAvatar = false);
+        orgToast(context, 'Could not remove the photo', error: true);
+        return;
+      }
+      setState(() {
+        _profile = {..._profile, ...user, 'avatar': null, 'image': null, 'picture': null};
+        _uploadingAvatar = false;
+      });
+      CurrentUser.avatar = null;
+      orgToast(context, 'Profile photo removed');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _uploadingAvatar = false);
       orgToast(context, errorText(e), error: true);
     }
   }
@@ -315,6 +348,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (mounted) orgToast(context, 'Email copied');
   }
 
+  Future<void> _openAllOrgs() => _push(AllOrganizationsScreen(organizations: _orgs));
+
   Future<void> _push(Widget screen) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
     if (mounted) _loadAll();
@@ -354,15 +389,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _sectionTitle('Upcoming events', action: 'View calendar', onAction: () => _push(const CalendarScreen())),
             _upcomingSection(),
             const SizedBox(height: 22),
-            _sectionTitle('Organizations'),
+            _sectionTitle('Organizations', action: _orgs.isEmpty ? null : 'View all', onAction: _openAllOrgs),
             _orgsSection(),
             const SizedBox(height: 22),
             _sectionTitle('Account'),
-            _menuTile(
-              icon: Icons.description_outlined,
-              label: 'My documents',
-              onTap: () => _push(const DocumentListScreen(title: 'My documents', scope: DocumentScope.personal)),
-            ),
             _menuTile(
               icon: Icons.bookmark_border_rounded,
               label: 'Saved items',
@@ -388,7 +418,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               onTap: () => _push(const CalendarScreen()),
             ),
             _menuTile(
-              icon: Icons.view_kanban_outlined,
+              icon: Icons.confirmation_number_outlined,
               label: 'Jira integration',
               onTap: () => _push(const JiraSettingsScreen()),
             ),
@@ -402,6 +432,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _statusRow() {
+    return ListenableBuilder(
+      listenable: PresenceService.instance,
+      builder: (context, _) {
+        final p = PresenceService.instance.mine;
+        return GestureDetector(
+          onTap: () => showSetStatusSheet(context),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    p?.subtitle ?? 'Set your status',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(Icons.edit_rounded, color: Colors.white54, size: 14),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -457,14 +522,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
           ],
-          if (_verified || since != null) ...[
+          const SizedBox(height: 12),
+          _statusRow(),
+          if (since != null) ...[
             const SizedBox(height: 14),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               alignment: WrapAlignment.center,
               children: [
-                if (_verified) _pill(Icons.verified_rounded, 'Verified', orgTeal),
                 if (since != null) _pill(Icons.calendar_today_rounded, 'Member since ${_memberSinceLabel(since)}', Colors.white70),
               ],
             ),
@@ -630,7 +696,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         else if (_orgs.isEmpty)
           _emptyCard('You are not part of any organization yet')
         else
-          for (final org in _orgs)
+          for (final org in _orgs.take(2))
             InkWell(
               borderRadius: BorderRadius.circular(14),
               onTap: () => _push(OrganizationDetailScreen(organization: org)),

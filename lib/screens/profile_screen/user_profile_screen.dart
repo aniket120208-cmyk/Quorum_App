@@ -191,6 +191,23 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     return parts.map((e) => e[0].toUpperCase() + e.substring(1)).join(' ');
   }
 
+  String _roleText(String raw) {
+    switch (raw.trim().toUpperCase()) {
+      case 'OWNER':
+        return 'Owner';
+      case 'ORG_ADMIN':
+      case 'ADMIN':
+        return 'Admin';
+      case 'LEAD':
+      case 'TEAM_HEAD':
+        return 'Team head';
+      case 'MEMBER':
+        return 'Member';
+      default:
+        return _title(raw);
+    }
+  }
+
   String _date(DateTime d) {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return '${months[d.month - 1]} ${d.day}, ${d.year}';
@@ -276,7 +293,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   Widget build(BuildContext context) {
     final email = _email;
     final role = widget.role;
-    final roleText = (role == null || role.trim().isEmpty) ? null : _title(role);
+    final roleText = (role == null || role.trim().isEmpty) ? null : _roleText(role);
     final joined = widget.joinedAt;
     final since = _memberSince;
     final useCases = _useCases;
@@ -307,7 +324,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           Center(
             child: GestureDetector(
               onTap: _avatar == null ? null : _viewAvatar,
-              child: ChatAvatar(name: _name, imageUrl: _avatar, radius: 52),
+              child: ChatAvatar(name: _name, imageUrl: _avatar, radius: 52, userId: widget.userId),
             ),
           ),
           const SizedBox(height: 16),
