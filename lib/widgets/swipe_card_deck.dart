@@ -5,7 +5,7 @@ enum SwipeDirection { left, right }
 
 class SwipeCardDeck<T> extends StatefulWidget {
   final List<T> items;
-  final Widget Function(BuildContext context, T item) itemBuilder;
+  final Widget Function(BuildContext context, T item, double depth) itemBuilder;
   final Future<bool> Function(T item, SwipeDirection direction) onSwipe;
   final void Function(T item, SwipeDirection direction) onSwiped;
   final String rightLabel;
@@ -139,10 +139,11 @@ class SwipeCardDeckState<T> extends State<SwipeCardDeck<T>> with SingleTickerPro
           children.add(
             Positioned.fill(
               child: Transform.translate(
-                offset: Offset(0, 14 * depth),
+                offset: Offset(0, -16 * depth),
                 child: Transform.scale(
                   scale: 1 - 0.05 * depth,
-                  child: widget.itemBuilder(context, widget.items[i]),
+                  alignment: Alignment.topCenter,
+                  child: widget.itemBuilder(context, widget.items[i], depth),
                 ),
               ),
             ),
@@ -163,7 +164,7 @@ class SwipeCardDeckState<T> extends State<SwipeCardDeck<T>> with SingleTickerPro
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      widget.itemBuilder(context, widget.items.first),
+                      widget.itemBuilder(context, widget.items.first, 0.0),
                       Positioned(
                         top: 28,
                         left: 24,
