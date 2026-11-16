@@ -466,6 +466,7 @@ class _CalendarCardState extends State<CalendarCard> with WidgetsBindingObserver
           const SizedBox(height: 8),
           GridView.builder(
             itemCount: 42,
+            padding: EdgeInsets.zero,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(

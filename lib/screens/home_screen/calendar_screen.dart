@@ -682,41 +682,30 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     ],
                   ),
                 ],
-                if (event.hasMeetingLink) ...[
+                if (canJoin) ...[
                   const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      if (canJoin)
-                        FilledButton.icon(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: _teal,
-                            foregroundColor: _background,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            minimumSize: const Size(0, 32),
-                          ),
-                          onPressed: () => _joinEvent(event),
-                          icon: const Icon(Icons.videocam_rounded, size: 16),
-                          label: const Text(
-                            'Join meeting',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _teal,
+                        foregroundColor: _background,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
                         ),
-                      if (canJoin) const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          event.meetingLink!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: _teal, fontSize: 12),
+                        minimumSize: const Size(0, 32),
+                      ),
+                      onPressed: () => _joinEvent(event),
+                      icon: const Icon(Icons.videocam_rounded, size: 16),
+                      label: const Text(
+                        'Join meeting',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    ],
+                    ),
                   ),
                 ],
               ],

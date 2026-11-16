@@ -4,6 +4,9 @@ import 'package:quorum_app/models/token_model.dart';
 import 'api_exception.dart';
 import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/notification_service.dart';
+import 'package:quorum_app/api/presence_service.dart';
+import 'package:quorum_app/api/quorumbot_controller.dart';
+import 'package:quorum_app/api/push_service.dart';
 import 'package:quorum_app/api/saved_items_store.dart';
 import 'package:quorum_app/api/socket_service.dart';
 
@@ -181,6 +184,9 @@ class AuthService {
   }
 
   Future<void> logout() async {
+    await PushService.instance.unregister();
+    PresenceService.instance.stop();
+    UltronController.instance.deactivate();
     await NotificationService.instance.stop();
     try {
       await apiClient.dio.post('/api/auth/logout');

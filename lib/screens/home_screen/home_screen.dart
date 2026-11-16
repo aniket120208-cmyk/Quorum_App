@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:quorum_app/api/quorumbot_controller.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/auth_service.dart';
 import 'package:quorum_app/api/current_user.dart';
@@ -12,9 +13,17 @@ import 'package:quorum_app/models/organization_models.dart';
 import 'package:quorum_app/screens/notification_screen/notification_screen.dart';
 import 'package:quorum_app/screens/organization_screen/create_organization_screen.dart';
 import 'package:quorum_app/screens/organization_screen/join_organization_screen.dart';
+import 'package:quorum_app/api/deep_link_service.dart';
+import 'package:quorum_app/api/presence_service.dart';
+import 'package:quorum_app/api/push_service.dart';
+import 'package:quorum_app/screens/profile_screen/set_status_sheet.dart';
+import 'package:quorum_app/widgets/presence_widgets.dart';
+import 'package:quorum_app/screens/organization_screen/all_organizations_screen.dart';
 import 'package:quorum_app/screens/organization_screen/organization_detail_screen.dart';
 import 'package:quorum_app/screens/organization_screen/organization_widgets.dart';
 import 'package:quorum_app/screens/profile_screen/profile_screen.dart';
+import 'package:quorum_app/screens/project_screen/accept_project_invite_screen.dart';
+import 'package:quorum_app/screens/project_screen/projects_list_screen.dart';
 import 'bottom_nav_bar.dart';
 import 'calendar_screen.dart';
 import 'home_stories.dart';
@@ -51,6 +60,13 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   void initState() {
     super.initState();
     NotificationService.instance.start();
+    PresenceService.instance.start();
+    PushService.instance.start();
+    UltronController.instance.activate();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      DeepLinkService.instance.markReady();
+      PushService.instance.markReady();
+    });
   }
 
   final List<Widget> _pages = const [
@@ -64,6 +80,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBody: true,
+      resizeToAvoidBottomInset: false,
       backgroundColor: const Color(0xFF0F101A),
       body: IndexedStack(
         index: _currentIndex,
@@ -88,7 +106,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+class _HomeScreenState extends State<HomeScreen>
+    with WidgetsBindingObserver {
   String _userName = CurrentUser.isLoaded ? CurrentUser.name : '';
   StreamSubscription<NotificationItem>? _notificationSub;
 
@@ -227,86 +246,109 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  Widget _profileAvatar() {
+    return GestureDetector(
+      onTap: _openProfile,
+      child: OrgAvatar(
+        name: _userName,
+        logo: CurrentUser.avatar,
+        size: 40,
+        circular: true,
+      ),
+    );
+  }
+
+  Widget _buildAppBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Text(
+              _greeting,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          ValueListenableBuilder<int>(
+            valueListenable: NotificationService.instance.unreadCount,
+            builder: (_, count, __) => _headerButton(
+              icon: Icons.notifications_none_rounded,
+              onTap: _showNotifications,
+              badge: count,
+            ),
+          ),
+          const SizedBox(width: 10),
+          GestureDetector(
+            onLongPress: () => showSetStatusSheet(context),
+            child: PresenceWrap(
+              userId: CurrentUser.id,
+              avatarSize: 40,
+              ringColor: const Color(0xFF090A10),
+              child: _profileAvatar(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: SafeArea(
-        child: RefreshIndicator(
-          color: _teal,
-          onRefresh: () => Future.wait([_loadOrgs(), _loadStories()]),
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'QUORUM',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+        bottom: false,
+        child: Column(
+          children: [
+            _buildAppBar(),
+            Expanded(
+              child: RefreshIndicator(
+                color: _teal,
+                onRefresh: () => Future.wait([
+                  _loadOrgs(),
+                  _loadStories(),
+                ]),
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: EdgeInsets.fromLTRB(
+                    16,
+                    12,
+                    16,
+                    4 + MediaQuery.of(context).padding.bottom,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Here is what is happening across your teams today.',
                         style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 2.5,
+                          color: _muted,
+                          fontSize: 13,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    ValueListenableBuilder<int>(
-                      valueListenable:
-                          NotificationService.instance.unreadCount,
-                      builder: (_, count, __) => _headerButton(
-                        icon: Icons.notifications_none_rounded,
-                        onTap: _showNotifications,
-                        badge: count,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    _headerButton(
-                      icon: Icons.person_outline_rounded,
-                      onTap: _openProfile,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 22),
-                Text(
-                  _greeting,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
+                      const SizedBox(height: 18),
+                      if (_storiesLoaded) ...[
+                        _buildStories(),
+                        const SizedBox(height: 18),
+                      ],
+                      _buildWorkspaceSection(),
+                      const SizedBox(height: 12),
+                      const SizedBox(height: 16),
+                      CalendarCard(),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Here is what is happening across your teams today.',
-                  style: TextStyle(
-                    color: _muted,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                if (_storiesLoaded) ...[
-                  _buildStories(),
-                  const SizedBox(height: 18),
-                ],
-                _buildHero(),
-                const SizedBox(height: 22),
-                _buildWorkspaceSection(),
-                const SizedBox(height: 12),
-                const SizedBox(height: 16),
-                CalendarCard(),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -317,16 +359,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       events = await CalendarRepository.instance.getUpcoming(limit: 6);
     } catch (_) {}
+
     final tasks = <TeamTask>[];
     try {
-      final orgs = _orgs ?? await OrganizationRepository.instance.organizations();
+      final orgs =
+          _orgs ?? await OrganizationRepository.instance.organizations();
       final lists = await Future.wait(
-        orgs.take(6).map((o) => OrganizationRepository.instance.myTasks(o.id).catchError((_) => <TeamTask>[])),
+        orgs.take(6).map(
+              (o) => OrganizationRepository.instance
+                  .myTasks(o.id)
+                  .catchError((_) => <TeamTask>[]),
+            ),
       );
       for (final list in lists) {
         tasks.addAll(list);
       }
     } catch (_) {}
+
     if (!mounted) return;
     setState(() {
       _events = events;
@@ -337,9 +386,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   List<StorySlide> _storySlides() {
     final now = DateTime.now();
-    final events = _events.where((e) => e.startDate.isAfter(now.subtract(const Duration(hours: 1)))).take(4).toList();
-    final open = _myTasks.where((t) => t.status != TaskStatus.completed).toList()
-      ..sort((a, b) => (a.dueDate ?? DateTime(9999)).compareTo(b.dueDate ?? DateTime(9999)));
+    final events = _events
+        .where((e) => e.startDate.isAfter(now.subtract(const Duration(hours: 1))))
+        .take(4)
+        .toList();
+    final open = _myTasks
+        .where((t) => t.status != TaskStatus.completed)
+        .toList()
+      ..sort(
+        (a, b) => (a.dueDate ?? DateTime(9999))
+            .compareTo(b.dueDate ?? DateTime(9999)),
+      );
     final overdue = open.where((t) => t.isOverdue).length;
     final unread = NotificationService.instance.unreadCount.value;
     final orgs = _orgs ?? const <Organization>[];
@@ -350,35 +407,54 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         label: 'Schedule',
         icon: Icons.event_rounded,
         colors: const [Color(0xFF7C5CFC), Color(0xFF4C3AE3)],
-        headline: events.isEmpty ? 'Nothing coming up' : (events.length == 1 ? '1 thing coming up' : '${events.length} things coming up'),
-        subtitle: events.isEmpty ? 'Your calendar is clear for now.' : 'Your next events and meetings.',
+        headline: events.isEmpty
+            ? 'Nothing coming up'
+            : (events.length == 1
+                ? '1 thing coming up'
+                : '${events.length} things coming up'),
+        subtitle: events.isEmpty
+            ? 'Your calendar is clear for now.'
+            : 'Your next events and meetings.',
         lines: [
           for (final e in events)
             StoryLine(
-              icon: e.meetingLink != null ? Icons.videocam_rounded : Icons.event_note_rounded,
+              icon: e.meetingLink != null
+                  ? Icons.videocam_rounded
+                  : Icons.event_note_rounded,
               text: e.title,
               trailing: storyTimeLabel(e.startDate, allDay: e.isAllDay),
             ),
         ],
         actionLabel: 'Open calendar',
-        onAction: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CalendarScreen())),
+        onAction: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const CalendarScreen(),
+          ),
+        ),
       ),
       StorySlide(
         id: 'tasks',
         label: 'Tasks',
         icon: Icons.task_alt_rounded,
         colors: const [Color(0xFF22A58A), Color(0xFF14806B)],
-        headline: open.isEmpty ? 'All tasks done' : (open.length == 1 ? '1 open task' : '${open.length} open tasks'),
+        headline: open.isEmpty
+            ? 'All tasks done'
+            : (open.length == 1
+                ? '1 open task'
+                : '${open.length} open tasks'),
         subtitle: open.isEmpty
             ? 'Nothing is waiting on you.'
-            : (overdue > 0 ? '$overdue overdue, tackle those first.' : 'Nothing overdue, nice work.'),
+            : (overdue > 0
+                ? '$overdue overdue, tackle those first.'
+                : 'Nothing overdue, nice work.'),
         lines: [
           for (final t in open.take(4))
             StoryLine(
               icon: taskStatusIcon(t.status),
               iconColor: t.isOverdue ? const Color(0xFFFFB4B4) : null,
               text: t.title,
-              trailing: t.dueDate != null ? taskDueLabel(t.dueDate!) : t.status.label,
+              trailing:
+                  t.dueDate != null ? taskDueLabel(t.dueDate!) : t.status.label,
             ),
         ],
       ),
@@ -387,8 +463,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         label: 'Alerts',
         icon: Icons.notifications_active_rounded,
         colors: const [Color(0xFFF59E0B), Color(0xFFEA580C)],
-        headline: unread == 0 ? 'All caught up' : (unread == 1 ? '1 unread alert' : '$unread unread alerts'),
-        subtitle: unread == 0 ? 'No new notifications.' : 'Mentions, invites and updates waiting for you.',
+        headline: unread == 0
+            ? 'All caught up'
+            : (unread == 1 ? '1 unread alert' : '$unread unread alerts'),
+        subtitle: unread == 0
+            ? 'No new notifications.'
+            : 'Mentions, invites and updates waiting for you.',
         actionLabel: unread == 0 ? null : 'Open notifications',
         onAction: unread == 0 ? null : _showNotifications,
       ),
@@ -397,14 +477,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         label: 'Teams',
         icon: Icons.apartment_rounded,
         colors: const [Color(0xFFEC4899), Color(0xFFBE185D)],
-        headline: orgs.isEmpty ? 'No workspaces yet' : (orgs.length == 1 ? '1 workspace' : '${orgs.length} workspaces'),
-        subtitle: orgs.isEmpty ? 'Create or join one to get started.' : 'Where your teams get things done.',
+        headline: orgs.isEmpty
+            ? 'No workspaces yet'
+            : (orgs.length == 1
+                ? '1 workspace'
+                : '${orgs.length} workspaces'),
+        subtitle: orgs.isEmpty
+            ? 'Create or join one to get started.'
+            : 'Where your teams get things done.',
         lines: [
           for (final o in orgs.take(4))
             StoryLine(
               icon: Icons.groups_rounded,
               text: o.name,
-              trailing: o.membersCount == 1 ? '1 member' : '${o.membersCount} members',
+              trailing: o.membersCount == 1
+                  ? '1 member'
+                  : '${o.membersCount} members',
             ),
         ],
       ),
@@ -419,106 +507,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         await openStories(context, slides, i);
         if (mounted) setState(() {});
       },
-    );
-  }
-
-  Widget _buildHero() {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        width: double.infinity,
-        height: 150,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF3A2D6B), Color(0xFF1E2A4A),],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: Stack(
-          children: [
-            Positioned(
-              right: -20,
-              top: -10,
-              child: Container(
-                width: 110,
-                height: 110,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    colors: [Color(0xFF6C4BE0), Color(0xFF3B2A93),],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              right: 70,
-              top: 28,
-              child: Container(
-                width: 14,
-                height: 14,
-                decoration: const BoxDecoration(
-                  color: Color(0xFFF5B83D),
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
-            Positioned(
-              right: -30,
-              bottom: -30,
-              child: Container(
-                width: 120,
-                height: 120,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF1F7F86),
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
-            Positioned(
-              right: 40,
-              bottom: 18,
-              child: Container(
-                width: 22,
-                height: 22,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF3DB6A8),
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.all(18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'Build, collaborate, make\nit happen.',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 19,
-                      fontWeight: FontWeight.bold,
-                      height: 1.25,
-                    ),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'Plan, create, collaborate and turn\nyour vision into reality.',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 11.5,
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -620,6 +608,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _loadOrgs();
   }
 
+  Future<void> _openJoinProject() async {
+    final joined = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const AcceptProjectInviteScreen()),
+    );
+    if (joined != true || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ProjectsListScreen()),
+    );
+  }
+
   void _showAddOrgSheet() {
     showModalBottomSheet(
       context: context,
@@ -635,6 +635,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              ListTile(
+                leading: _iconBox(Icons.handshake_outlined),
+                title: const Text(
+                  'Join a Project',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _openJoinProject();
+                },
+              ),
               ListTile(
                 leading: _iconBox(Icons.add_business_outlined),
                 title: const Text(
@@ -729,20 +743,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildOrganizations(List<Organization> orgs) {
+    final visible = orgs.take(4).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              orgs.length == 1 ? 'Your Organization' : 'Your Organizations',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
+            Expanded(
+              child: Text(
+                orgs.length == 1 ? 'Your Organization' : 'Your Organizations',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
+            GestureDetector(
+              onTap: () => _openAllOrgs(orgs),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                child: Text(
+                  'View all',
+                  style: TextStyle(
+                    color: _teal,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
             GestureDetector(
               onTap: _showAddOrgSheet,
               child: Container(
@@ -763,65 +796,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ],
         ),
         const SizedBox(height: 12),
-        for (final org in orgs) ...[
-          _orgTile(org),
+        for (final org in visible) ...[
+          OrgListTile(
+            organization: org,
+            onTap: () => _openOrg(org),
+          ),
           const SizedBox(height: 10),
         ],
       ],
     );
   }
 
-  Widget _orgTile(Organization org) {
-    return GestureDetector(
-      onTap: () => _openOrg(org),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: _cardDecoration(),
-        child: Row(
-          children: [
-            OrgAvatar(
-              name: org.name,
-              logo: org.logo,
-              size: 46,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    org.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    '${org.membersCount} ${org.membersCount == 1 ? 'member' : 'members'} · ${org.teamsCount} ${org.teamsCount == 1 ? 'team' : 'teams'}',
-                    style: const TextStyle(
-                      color: _muted,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            OrgRoleBadge(role: org.role),
-            const SizedBox(width: 6),
-            const Icon(
-              Icons.chevron_right_rounded,
-              color: _muted,
-              size: 22,
-            ),
-          ],
-        ),
+  Future<void> _openAllOrgs(List<Organization> orgs) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AllOrganizationsScreen(organizations: orgs),
       ),
     );
+
+    if (!mounted) return;
+    await _loadOrgs();
   }
 
   Widget _buildWorkspaceActions() {
@@ -861,6 +856,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
             ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: _actionCard(
+            icon: Icons.handshake_outlined,
+            title: 'Freelance & Company to Company Collaboration',
+            subtitle:
+                'Join a project with an invitation token or link, no organization needed',
+            cta: 'Join a project',
+            onTap: _openJoinProject,
           ),
         ),
       ],
