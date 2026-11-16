@@ -11,6 +11,7 @@ import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/meeting_api.dart';
 import 'package:quorum_app/api/meeting_service.dart';
 import 'package:quorum_app/api/recording_uploader.dart';
+import 'package:quorum_app/api/meeting_history_store.dart';
 import 'package:quorum_app/api/system_pip_service.dart';
 import 'package:quorum_app/screens/recording_screen/meeting_recordings_screen.dart';
 import 'package:quorum_app/screens/recording_screen/recording_widgets.dart';
@@ -98,6 +99,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   MeetingService get _svc => _svcOrNull!;
   String get _link => MeetingApi.linkFor(widget.meetingCode);
   List<RemotePeer> get _remote => _svc.participants;
+  RemotePeer? get _presenter => _svc.remoteSharer;
   bool get _micMuted => _svc.isMuted;
   bool get _cameraOff => _svc.isVideoOff || !_svc.hasLocalVideo;
 
@@ -209,6 +211,24 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     if (mounted) setState(() => _mediaReady = true);
   }
 
+  Future<void> _recordJoin(DateTime joinedAt) async {
+    try {
+      if (!CurrentUser.isLoaded) {
+        CurrentUser.setFromProfile(await AuthService.instance.getUserProfile());
+      }
+      if (!CurrentUser.isLoaded) return;
+      await MeetingHistoryStore.instance.add(
+        CurrentUser.id,
+        MeetingHistoryItem(
+          code: widget.meetingCode,
+          title: widget.title,
+          timestamp: joinedAt,
+          durationSeconds: 0,
+        ),
+      );
+    } catch (_) {}
+  }
+
   void _onService() {
     if (!mounted) return;
     final msg = _svc.message;
@@ -220,7 +240,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         if (_phase == _Phase.joining || _phase == _Phase.waiting) {
           _phase = _Phase.inCall;
           SystemPipService.instance.setAutoEnter(true);
-          _joinedAt = DateTime.now();
+          final joinedNow = DateTime.now();
+          _joinedAt = joinedNow;
+          _recordJoin(joinedNow);
           _callTimer = Timer.periodic(const Duration(seconds: 1), (_) => _seconds.value++);
           _scheduleHideControls();
         }
@@ -304,6 +326,42 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
     _hideTimer?.cancel();
     setState(() => _controlsVisible = true);
+
+    if (_svc.isHost && (_svc.isRecording || _svc.isCapturingRecording)) {
+      _dialogOpen = true;
+      final stop = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('Recording in progress'),
+          content: const Text(
+            'This meeting is still being recorded. Stop the recording first, then you can leave or end the meeting.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel', style: TextStyle(color: Colors.white))),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Stop recording', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+      _dialogOpen = false;
+      if (stop != true || !mounted) {
+        _showControls();
+        return;
+      }
+      final error = await _svc.stopRecording();
+      if (!mounted) return;
+      if (error != null) {
+        _snack(error);
+        _showControls();
+        return;
+      }
+    }
+
     _dialogOpen = true;
 
     final choice = await showDialog<_LeaveChoice>(
@@ -314,15 +372,13 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         title: const Text('Leave meeting?'),
         content: Text(
           _svc.isHost
-              ? (_svc.isCapturingRecording
-                  ? 'Leaving will stop and upload the recording. You can leave and let others continue, or end the meeting for everyone.'
-                  : 'You can leave and let others continue, or end the meeting for everyone.')
+              ? 'You can leave and let others continue, or end the meeting for everyone.'
               : 'You can rejoin anytime with the same code.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(_LeaveChoice.stay),
-            child: const Text('Stay'),
+            child: const Text('Stay', style: TextStyle(color: Colors.white)),
           ),
           if (_svc.isHost)
             FilledButton(
@@ -373,10 +429,13 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     setState(() => _phase = _Phase.leaving);
 
     if (!skipServer && _svcOrNull != null) {
-      await _svc.leave(endForAll: endForAll && _svc.isHost);
-      if (endForAll && _svc.isHost) {
+      final ending = endForAll && _svc.isHost;
+      try {
+        await _svc.leave(endForAll: ending).timeout(const Duration(seconds: 8));
+      } catch (_) {}
+      if (ending) {
         try {
-          await MeetingApi.instance.endMeeting(widget.meetingCode);
+          await MeetingApi.instance.endMeeting(widget.meetingCode).timeout(const Duration(seconds: 8));
         } catch (_) {}
       }
     }
@@ -490,26 +549,6 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       if (error != null) _snack(error);
       return;
     }
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Record this meeting?'),
-        content: const Text(
-          'Everyone in the meeting will be notified. The recording is stored for 7 days and can be summarized with AI.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Start recording', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
     final error = await svc.startRecording();
     if (error != null) _snack(error);
   }
@@ -577,14 +616,20 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 },
               ),
               ListTile(
+                enabled: _svc.isScreenSharing || _presenter == null,
                 leading: Icon(
                   _svc.isScreenSharing ? Icons.stop_screen_share_rounded : Icons.screen_share_rounded,
-                  color: _svc.isScreenSharing ? Colors.redAccent : Colors.white,
+                  color: _svc.isScreenSharing
+                      ? Colors.redAccent
+                      : (_presenter == null ? Colors.white : Colors.white30),
                 ),
                 title: Text(
                   _svc.isScreenSharing ? 'Stop sharing' : 'Share screen',
-                  style: const TextStyle(color: Colors.white),
+                  style: TextStyle(color: (_svc.isScreenSharing || _presenter == null) ? Colors.white : Colors.white30),
                 ),
+                subtitle: (!_svc.isScreenSharing && _presenter != null)
+                    ? Text('${_presenter!.name} is already sharing', style: const TextStyle(color: Colors.white38, fontSize: 12))
+                    : null,
                 onTap: () {
                   Navigator.of(ctx).pop();
                   _toggleScreenShare();
@@ -826,8 +871,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: _copyLink,
-                          icon: const Icon(Icons.link_rounded, size: 18),
-                          label: const Text('Copy link'),
+                          icon: const Icon(Icons.link_rounded, size: 18, color: Colors.white),
+                          label: const Text('Copy link', style: TextStyle(color: Colors.white)),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -970,6 +1015,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     if (svc != null && !_cameraOff) {
       return RTCVideoView(
         svc.localRenderer,
+        key: ValueKey(svc.previewEpoch),
         mirror: svc.isFrontCamera,
         objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
       );
@@ -1100,7 +1146,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                         style: TextStyle(color: Colors.orangeAccent, fontSize: 12),
                       ),
                     ),
-                    TextButton(onPressed: openAppSettings, child: const Text('Settings')),
+                    TextButton(onPressed: openAppSettings, child: const Text('Settings', style: TextStyle(color: Colors.white))),
                   ],
                 ),
               ),
@@ -1210,7 +1256,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             ],
           ),
         ),
-        if (_remote.length == 1 && inCall)
+        if (_remote.length == 1 && inCall && _presenter == null)
           Positioned.fill(
             child: DraggablePipView(
               topInset: pad.top + 72,
@@ -1378,8 +1424,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                           Expanded(
                             child: OutlinedButton.icon(
                               onPressed: _copyLink,
-                              icon: const Icon(Icons.link_rounded, size: 18),
-                              label: const Text('Copy link'),
+                              icon: const Icon(Icons.link_rounded, size: 18, color: Colors.white),
+                              label: const Text('Copy link', style: TextStyle(color: Colors.white)),
                             ),
                           ),
                           const SizedBox(width: 10),
@@ -1525,7 +1571,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               minimumSize: const Size(56, 34),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
-            child: const Text('Stop', style: TextStyle(fontWeight: FontWeight.w700)),
+            child: const Text('Stop', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.white)),
           ),
         ],
       ),
@@ -1580,7 +1626,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               const SizedBox(height: 4),
               Text(widget.meetingCode, style: const TextStyle(color: Colors.white54, fontSize: 13)),
               const SizedBox(height: 16),
-              TextButton(onPressed: _requestLeave, child: const Text('Cancel')),
+              TextButton(onPressed: _requestLeave, child: const Text('Cancel', style: TextStyle(color: Colors.white))),
             ],
           ),
         ),
@@ -1607,7 +1653,93 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     );
   }
 
+  Widget _presenterScreen(RemotePeer presenter) {
+    final ready = presenter.hasVideo;
+    return Container(
+      color: Colors.black,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (ready)
+            InteractiveViewer(
+              minScale: 1,
+              maxScale: 4,
+              child: SizedBox.expand(
+                child: RTCVideoView(
+                  presenter.renderer,
+                  objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+                ),
+              ),
+            )
+          else
+            const Center(child: CircularProgressIndicator(color: Colors.white54)),
+          Positioned(
+            left: 10,
+            top: 10,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.screen_share_rounded, color: Colors.white, size: 14),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${presenter.name} is presenting',
+                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (presenter.isHandRaised)
+            Positioned(
+              right: 10,
+              top: 10,
+              child: _handBadge(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _presenterStage(RemotePeer presenter, EdgeInsets pad) {
+    final others = <Widget>[
+      for (final p in _remote)
+        if (p.userId != presenter.userId) _remoteTile(p, rounded: true),
+      _selfTile(),
+    ];
+    return Container(
+      color: Colors.black,
+      padding: EdgeInsets.fromLTRB(0, pad.top + 56, 0, pad.bottom + 104),
+      child: Column(
+        children: [
+          Expanded(child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _toggleControls,
+            child: _presenterScreen(presenter),
+          )),
+          SizedBox(
+            height: 96,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+              itemCount: others.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (_, i) => SizedBox(width: 120, height: 88, child: others[i]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _remoteStage(EdgeInsets pad) {
+    final presenter = _presenter;
+    if (presenter != null) return _presenterStage(presenter, pad);
     if (_remote.length == 1) {
       return SizedBox.expand(child: _remoteTile(_remote.first, rounded: false));
     }
@@ -1887,9 +2019,9 @@ class _PollsBottomSheetState extends State<_PollsBottomSheet> {
                   ),
                   TextButton.icon(
                     onPressed: _create,
-                    icon: const Icon(Icons.add_rounded, size: 20),
-                    label: const Text('New poll'),
-                    style: TextButton.styleFrom(foregroundColor: AppColors.primaryLight),
+                    icon: const Icon(Icons.add_rounded, size: 20, color: Colors.white),
+                    label: const Text('New poll', style: TextStyle(color: Colors.white)),
+                    style: TextButton.styleFrom(foregroundColor: Colors.white),
                   ),
                 ],
               ),

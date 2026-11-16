@@ -69,6 +69,7 @@ class RecStatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (status == RecordingStatus.completed) return const SizedBox.shrink();
     final color = recStatusColor(status);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -137,7 +138,7 @@ class RecUploadCard extends StatelessWidget {
                     IconButton(
                       visualDensity: VisualDensity.compact,
                       onPressed: onDismiss,
-                      icon: const Icon(Icons.close_rounded, color: orgMuted, size: 18),
+                      icon: const Icon(Icons.close_rounded, color: Colors.white, size: 18),
                     ),
                 ],
               ),
@@ -161,10 +162,11 @@ class RecUploadCard extends StatelessWidget {
                   height: 38,
                   child: FilledButton.icon(
                     onPressed: onRetry,
-                    icon: const Icon(Icons.refresh_rounded, size: 18),
-                    label: const Text('Retry upload'),
+                    icon: const Icon(Icons.refresh_rounded, size: 18, color: Colors.white),
+                    label: const Text('Retry upload', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
                     style: FilledButton.styleFrom(
                       backgroundColor: orgAccent,
+                      foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                   ),

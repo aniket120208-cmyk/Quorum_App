@@ -36,13 +36,13 @@ class MeetingDocumentPanel extends StatelessWidget {
           headerActions: [
             IconButton(
               tooltip: 'Hide document',
-              icon: const Icon(Icons.keyboard_arrow_down_rounded),
+              icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white),
               onPressed: onHide,
             ),
             if (canClose)
               IconButton(
                 tooltip: 'Close for everyone',
-                icon: const Icon(Icons.close_rounded),
+                icon: const Icon(Icons.close_rounded, color: Colors.white),
                 onPressed: onClose,
               ),
           ],

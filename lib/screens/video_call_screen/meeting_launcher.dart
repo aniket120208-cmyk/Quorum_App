@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/deep_link_router.dart';
 import 'package:quorum_app/api/meeting_api.dart';
+import 'package:quorum_app/api/auth_service.dart';
 import 'package:quorum_app/api/meeting_history_store.dart';
 import 'package:quorum_app/app_navigator.dart';
 import 'package:quorum_app/models/meeting_models.dart';
@@ -44,13 +45,15 @@ class MeetingLauncher {
   }
 
   static Future<void> _record(MeetingResult? result) async {
-    if (result == null || !result.joined || !CurrentUser.isLoaded) return;
+    if (result == null || !result.joined) return;
     try {
-      final store = MeetingHistoryStore.instance;
-      final current = await store.load(CurrentUser.id);
-      await store.save(
+      if (!CurrentUser.isLoaded) {
+        CurrentUser.setFromProfile(await AuthService.instance.getUserProfile());
+      }
+      if (!CurrentUser.isLoaded) return;
+      await MeetingHistoryStore.instance.add(
         CurrentUser.id,
-        [MeetingHistoryItem.fromResult(result), ...current],
+        MeetingHistoryItem.fromResult(result),
       );
     } catch (_) {}
   }

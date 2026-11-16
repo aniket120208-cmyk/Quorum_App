@@ -210,6 +210,18 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
     );
   }
 
+  Future<void> _openFullscreen() async {
+    final player = _player;
+    if (player == null || !player.value.isInitialized) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _FullscreenPlayer(player: player),
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
   Widget _playerArea(MeetingRecording r) {
     final player = _player;
     Widget child;
@@ -244,6 +256,16 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
                 decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
                 child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 34),
               ),
+            ),
+          ),
+          Positioned(
+            top: 4,
+            right: 4,
+            child: IconButton(
+              tooltip: 'Full screen',
+              style: IconButton.styleFrom(backgroundColor: Colors.black45),
+              icon: const Icon(Icons.fullscreen_rounded, color: Colors.white, size: 22),
+              onPressed: _openFullscreen,
             ),
           ),
           Positioned(
@@ -306,7 +328,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
             if (action != null)
               TextButton(
                 onPressed: action.$2,
-                child: Text(action.$1, style: const TextStyle(color: orgTeal, fontWeight: FontWeight.w700)),
+                child: Text(action.$1, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
               ),
           ],
         ),
@@ -424,11 +446,13 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
               height: 46,
               child: FilledButton.icon(
                 onPressed: r.isPlayable ? () => _summarize() : null,
-                icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-                label: const Text('Generate AI Summary', style: TextStyle(fontWeight: FontWeight.w700)),
+                icon: const Icon(Icons.auto_awesome_rounded, size: 18, color: Colors.white),
+                label: const Text('Generate AI Summary', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.white)),
                 style: FilledButton.styleFrom(
                   backgroundColor: orgAccent,
+                  foregroundColor: Colors.white,
                   disabledBackgroundColor: orgField,
+                  disabledForegroundColor: Colors.white38,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
               ),
@@ -456,7 +480,173 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
             const SizedBox(height: 12),
             TextButton(
               onPressed: _load,
-              child: const Text('Retry', style: TextStyle(color: orgTeal, fontWeight: FontWeight.w700)),
+              child: const Text('Retry', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+class _FullscreenPlayer extends StatefulWidget {
+  const _FullscreenPlayer({required this.player});
+  final VideoPlayerController player;
+
+  @override
+  State<_FullscreenPlayer> createState() => _FullscreenPlayerState();
+}
+
+class _FullscreenPlayerState extends State<_FullscreenPlayer> {
+  bool _controls = true;
+  Timer? _hideTimer;
+
+  VideoPlayerController get _p => widget.player;
+
+  @override
+  void initState() {
+    super.initState();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    if (_p.value.aspectRatio > 1) {
+      SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
+    _p.addListener(_tick);
+    _scheduleHide();
+  }
+
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    _p.removeListener(_tick);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+    super.dispose();
+  }
+
+  void _tick() {
+    if (mounted) setState(() {});
+  }
+
+  void _scheduleHide() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted && _p.value.isPlaying) setState(() => _controls = false);
+    });
+  }
+
+  void _toggleControls() {
+    setState(() => _controls = !_controls);
+    if (_controls) _scheduleHide();
+  }
+
+  void _togglePlay() {
+    if (_p.value.isPlaying) {
+      _p.pause();
+    } else {
+      _p.play();
+    }
+    _scheduleHide();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final aspect = _p.value.aspectRatio > 0 ? _p.value.aspectRatio : 16 / 9;
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _toggleControls,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Center(
+              child: AspectRatio(aspectRatio: aspect, child: VideoPlayer(_p)),
+            ),
+            AnimatedOpacity(
+              opacity: _controls ? 1 : 0,
+              duration: const Duration(milliseconds: 200),
+              child: IgnorePointer(
+                ignoring: !_controls,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: SafeArea(
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: IconButton(
+                              tooltip: 'Exit full screen',
+                              style: IconButton.styleFrom(backgroundColor: Colors.black45),
+                              icon: const Icon(Icons.fullscreen_exit_rounded, color: Colors.white, size: 26),
+                              onPressed: () => Navigator.of(context).pop(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Center(
+                      child: GestureDetector(
+                        onTap: _togglePlay,
+                        child: Container(
+                          width: 64,
+                          height: 64,
+                          decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                          child: Icon(
+                            _p.value.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                            color: Colors.white,
+                            size: 38,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 16,
+                      right: 16,
+                      bottom: 0,
+                      child: SafeArea(
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(
+                            children: [
+                              Text(
+                                recDuration(_p.value.position.inSeconds),
+                                style: const TextStyle(color: Colors.white, fontSize: 12),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: VideoProgressIndicator(
+                                  _p,
+                                  allowScrubbing: true,
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  colors: const VideoProgressColors(
+                                    playedColor: orgTeal,
+                                    bufferedColor: Colors.white24,
+                                    backgroundColor: Colors.white12,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                recDuration(_p.value.duration.inSeconds),
+                                style: const TextStyle(color: Colors.white, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         ),

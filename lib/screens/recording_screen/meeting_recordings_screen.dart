@@ -163,7 +163,7 @@ class _MeetingRecordingsScreenState extends State<MeetingRecordingsScreen> {
       body: ListenableBuilder(
         listenable: _uploader,
         builder: (context, _) {
-          final jobs = _uploader.jobsFor(widget.meetingCode);
+          final jobs = _uploader.jobsFor(widget.meetingCode).where((j) => j.stage != RecordingJobStage.done).toList();
           if (_loading) return const Center(child: CircularProgressIndicator(color: orgTeal));
           if (_error != null && _items.isEmpty && jobs.isEmpty) return _errorView();
           return RefreshIndicator(
@@ -230,7 +230,7 @@ class _MeetingRecordingsScreenState extends State<MeetingRecordingsScreen> {
             const SizedBox(height: 12),
             TextButton(
               onPressed: () => _load(),
-              child: const Text('Retry', style: TextStyle(color: orgTeal, fontWeight: FontWeight.w700)),
+              child: const Text('Retry', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
             ),
           ],
         ),
