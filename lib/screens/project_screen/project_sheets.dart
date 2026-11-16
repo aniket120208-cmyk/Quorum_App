@@ -22,7 +22,6 @@ class CreateProjectSheet extends StatefulWidget {
 class _CreateProjectSheetState extends State<CreateProjectSheet> {
   final _name = TextEditingController();
   final _desc = TextEditingController();
-  final _budget = TextEditingController();
   DateTime? _due;
   bool _loading = false;
 
@@ -30,7 +29,6 @@ class _CreateProjectSheetState extends State<CreateProjectSheet> {
   void dispose() {
     _name.dispose();
     _desc.dispose();
-    _budget.dispose();
     super.dispose();
   }
 
@@ -40,19 +38,12 @@ class _CreateProjectSheetState extends State<CreateProjectSheet> {
       orgToast(context, 'Project name is required', error: true);
       return;
     }
-    final budgetText = _budget.text.trim();
-    final budget = budgetText.isEmpty ? null : double.tryParse(budgetText);
-    if (budgetText.isNotEmpty && budget == null) {
-      orgToast(context, 'Enter a valid budget', error: true);
-      return;
-    }
     setState(() => _loading = true);
     try {
       final project = await ProjectRepository.instance.createProject(
         widget.organizationId,
         name: name,
         description: _desc.text.trim(),
-        budget: budget,
         dueDate: _due,
       );
       if (!mounted) return;
@@ -89,13 +80,6 @@ class _CreateProjectSheetState extends State<CreateProjectSheet> {
             decoration: orgInputDecoration('Description (optional)'),
           ),
           const SizedBox(height: 14),
-          TextField(
-            controller: _budget,
-            style: const TextStyle(color: Colors.white),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: orgInputDecoration('Budget (optional)', hint: 'e.g. 8000'),
-          ),
-          const SizedBox(height: 14),
           ProjDateField(label: 'Due date (optional)', value: _due, onChanged: (d) => setState(() => _due = d)),
           const SizedBox(height: 22),
           OrgPrimaryButton(label: 'Create project', loading: _loading, onPressed: _create),
@@ -117,9 +101,6 @@ class _EditProjectSheetState extends State<EditProjectSheet> {
   static const _statuses = ['ACTIVE', 'ON_HOLD', 'COMPLETED', 'CANCELLED'];
   late final _name = TextEditingController(text: widget.project.name);
   late final _desc = TextEditingController(text: widget.project.description ?? '');
-  late final _budget = TextEditingController(
-    text: widget.project.budget == null ? '' : projMoney(widget.project.budget!).substring(1),
-  );
   late DateTime? _due = widget.project.dueDate;
   late String _status = _statuses.contains(widget.project.status) ? widget.project.status : 'ACTIVE';
   bool _loading = false;
@@ -128,7 +109,6 @@ class _EditProjectSheetState extends State<EditProjectSheet> {
   void dispose() {
     _name.dispose();
     _desc.dispose();
-    _budget.dispose();
     super.dispose();
   }
 
@@ -140,12 +120,6 @@ class _EditProjectSheetState extends State<EditProjectSheet> {
       orgToast(context, 'Project name is required', error: true);
       return;
     }
-    final budgetText = _budget.text.trim();
-    final budget = budgetText.isEmpty ? null : double.tryParse(budgetText);
-    if (budgetText.isNotEmpty && budget == null) {
-      orgToast(context, 'Enter a valid budget', error: true);
-      return;
-    }
     setState(() => _loading = true);
     try {
       await ProjectRepository.instance.updateProject(
@@ -153,7 +127,6 @@ class _EditProjectSheetState extends State<EditProjectSheet> {
         name: name,
         description: _desc.text.trim(),
         status: _status,
-        budget: budget,
         dueDate: _due,
       );
       if (!mounted) return;
@@ -197,13 +170,6 @@ class _EditProjectSheetState extends State<EditProjectSheet> {
             decoration: orgInputDecoration('Status'),
             items: [for (final s in _statuses) DropdownMenuItem(value: s, child: Text(_statusLabel(s)))],
             onChanged: (v) => setState(() => _status = v ?? _status),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _budget,
-            style: const TextStyle(color: Colors.white),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: orgInputDecoration('Budget'),
           ),
           const SizedBox(height: 14),
           ProjDateField(label: 'Due date', value: _due, onChanged: (d) => setState(() => _due = d)),
@@ -332,7 +298,7 @@ class _InviteCollaboratorSheetState extends State<InviteCollaboratorSheet> {
           dropdownColor: orgCard,
           style: const TextStyle(color: Colors.white),
           decoration: orgInputDecoration('Role'),
-          items: [for (final r in ProjectRole.values) DropdownMenuItem(value: r, child: Text(r.label))],
+          items: [for (final r in ProjectRole.selectable) DropdownMenuItem(value: r, child: Text(r.label))],
           onChanged: (v) => setState(() => _role = v ?? _role),
         ),
         const SizedBox(height: 14),
@@ -366,7 +332,9 @@ class EditMemberSheet extends StatefulWidget {
 }
 
 class _EditMemberSheetState extends State<EditMemberSheet> {
-  late ProjectRole _role = widget.member.role;
+  late final ProjectRole _initialRole =
+      ProjectRole.selectable.contains(widget.member.role) ? widget.member.role : ProjectRole.projectManager;
+  late ProjectRole _role = _initialRole;
   late final _rate = TextEditingController(
     text: widget.member.hourlyRate == null ? '' : projMoney(widget.member.hourlyRate!).substring(1),
   );
@@ -392,7 +360,7 @@ class _EditMemberSheetState extends State<EditMemberSheet> {
       await ProjectRepository.instance.updateMember(
         widget.projectId,
         widget.member.user.id,
-        role: _role,
+        role: _role == _initialRole ? null : _role,
         hourlyRate: rate,
         companyName: _company.text.trim(),
       );
@@ -419,7 +387,7 @@ class _EditMemberSheetState extends State<EditMemberSheet> {
             dropdownColor: orgCard,
             style: const TextStyle(color: Colors.white),
             decoration: orgInputDecoration('Role'),
-            items: [for (final r in ProjectRole.values) DropdownMenuItem(value: r, child: Text(r.label))],
+            items: [for (final r in ProjectRole.selectable) DropdownMenuItem(value: r, child: Text(r.label))],
             onChanged: (v) => setState(() => _role = v ?? _role),
           ),
           const SizedBox(height: 14),
@@ -450,12 +418,10 @@ class TaskFormSheet extends StatefulWidget {
     required this.projectId,
     required this.members,
     this.task,
-    this.canEditCore = true,
   });
   final String projectId;
   final List<ProjectMember> members;
   final ProjectTask? task;
-  final bool canEditCore;
 
   @override
   State<TaskFormSheet> createState() => _TaskFormSheetState();
@@ -464,12 +430,15 @@ class TaskFormSheet extends StatefulWidget {
 class _TaskFormSheetState extends State<TaskFormSheet> {
   late final _title = TextEditingController(text: widget.task?.title ?? '');
   late final _desc = TextEditingController(text: widget.task?.description ?? '');
-  late ProjectTaskPriority _priority = widget.task?.priority ?? ProjectTaskPriority.medium;
+  late ProjectTaskPriority? _priority = widget.task?.priority;
   late String? _assigneeId = widget.task?.assigneeId;
   late DateTime? _due = widget.task?.dueDate;
   bool _loading = false;
 
   bool get _editing => widget.task != null;
+
+  List<ProjectMember> get _freelancers =>
+      widget.members.where((m) => m.role == ProjectRole.freelancer).toList();
 
   @override
   void dispose() {
@@ -480,8 +449,23 @@ class _TaskFormSheetState extends State<TaskFormSheet> {
 
   Future<void> _save() async {
     final title = _title.text.trim();
+    final priority = _priority;
+    final assigneeId = _assigneeId;
+    final due = _due;
     if (title.isEmpty) {
       orgToast(context, 'Task title is required', error: true);
+      return;
+    }
+    if (priority == null) {
+      orgToast(context, 'Select a priority', error: true);
+      return;
+    }
+    if (assigneeId == null) {
+      orgToast(context, 'Select a freelancer to assign this task to', error: true);
+      return;
+    }
+    if (due == null) {
+      orgToast(context, 'Select a due date', error: true);
       return;
     }
     setState(() => _loading = true);
@@ -492,20 +476,20 @@ class _TaskFormSheetState extends State<TaskFormSheet> {
         saved = await repo.updateTask(
           widget.projectId,
           widget.task!.id,
-          title: widget.canEditCore ? title : null,
+          title: title,
           description: _desc.text.trim(),
-          priority: widget.canEditCore ? _priority : null,
-          assigneeId: widget.canEditCore ? _assigneeId : null,
-          dueDate: widget.canEditCore ? _due : null,
+          priority: priority,
+          assigneeId: assigneeId,
+          dueDate: due,
         );
       } else {
         saved = await repo.createTask(
           widget.projectId,
           title: title,
           description: _desc.text.trim(),
-          priority: _priority,
-          assigneeId: _assigneeId,
-          dueDate: _due,
+          priority: priority,
+          assigneeId: assigneeId,
+          dueDate: due,
         );
       }
       if (!mounted) return;
@@ -519,8 +503,8 @@ class _TaskFormSheetState extends State<TaskFormSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final core = widget.canEditCore;
-    final ids = widget.members.map((m) => m.user.id).toSet();
+    final freelancers = _freelancers;
+    final ids = freelancers.map((m) => m.user.id).toSet();
     final assigneeValue = ids.contains(_assigneeId) ? _assigneeId : null;
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 22, 20, 20),
@@ -531,7 +515,6 @@ class _TaskFormSheetState extends State<TaskFormSheet> {
           ProjSheetTitle(_editing ? 'Edit task' : 'New task'),
           TextField(
             controller: _title,
-            enabled: core,
             style: const TextStyle(color: Colors.white),
             textCapitalization: TextCapitalization.sentences,
             decoration: orgInputDecoration('Title'),
@@ -552,36 +535,34 @@ class _TaskFormSheetState extends State<TaskFormSheet> {
             style: const TextStyle(color: Colors.white),
             decoration: orgInputDecoration('Priority'),
             items: [for (final p in ProjectTaskPriority.values) DropdownMenuItem(value: p, child: Text(p.label))],
-            onChanged: core ? (v) => setState(() => _priority = v ?? _priority) : null,
+            onChanged: (v) => setState(() => _priority = v),
           ),
           const SizedBox(height: 14),
-          DropdownButtonFormField<String?>(
+          DropdownButtonFormField<String>(
             value: assigneeValue,
             dropdownColor: orgCard,
             isExpanded: true,
             style: const TextStyle(color: Colors.white),
             decoration: orgInputDecoration('Assignee'),
             items: [
-              const DropdownMenuItem<String?>(value: null, child: Text('Unassigned')),
-              for (final m in widget.members)
-                DropdownMenuItem<String?>(
+              for (final m in freelancers)
+                DropdownMenuItem<String>(
                   value: m.user.id,
-                  child: Text(
-                    m.companyName == null ? m.user.name : '${m.user.name} · ${m.companyName}',
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: Text(m.user.name, overflow: TextOverflow.ellipsis),
                 ),
             ],
-            onChanged: core ? (v) => setState(() => _assigneeId = v) : null,
+            onChanged: (v) => setState(() => _assigneeId = v),
           ),
-          const SizedBox(height: 14),
-          IgnorePointer(
-            ignoring: !core,
-            child: Opacity(
-              opacity: core ? 1 : 0.5,
-              child: ProjDateField(label: 'Due date', value: _due, onChanged: (d) => setState(() => _due = d)),
+          if (freelancers.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text(
+                'No freelancers in this project yet. Invite one from the Members tab.',
+                style: TextStyle(color: orgMuted, fontSize: 12),
+              ),
             ),
-          ),
+          const SizedBox(height: 14),
+          ProjDateField(label: 'Due date', value: _due, onChanged: (d) => setState(() => _due = d)),
           const SizedBox(height: 22),
           OrgPrimaryButton(label: _editing ? 'Save changes' : 'Create task', loading: _loading, onPressed: _save),
         ],
@@ -738,6 +719,10 @@ class ReviewDeliverableSheet extends StatefulWidget {
 class _ReviewDeliverableSheetState extends State<ReviewDeliverableSheet> {
   final _feedback = TextEditingController();
   bool _loading = false;
+  bool _uploading = false;
+  double _progress = 0;
+  String? _fileName;
+  String? _fileUrl;
 
   @override
   void dispose() {
@@ -745,9 +730,40 @@ class _ReviewDeliverableSheetState extends State<ReviewDeliverableSheet> {
     super.dispose();
   }
 
+  Future<void> _pickFile() async {
+    try {
+      final f = await FilePicker.pickFile(type: FileType.any);
+      final path = f?.path;
+      final name = f?.name;
+      if (path == null || name == null) return;
+      await UploadService.ensureWithinLimit(path, name);
+      setState(() {
+        _uploading = true;
+        _progress = 0;
+      });
+      final result = await UploadService.instance.upload(
+        path: path,
+        fileName: name,
+        folder: 'project_feedback',
+        onProgress: (p) {
+          if (mounted) setState(() => _progress = p);
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _fileUrl = result.url;
+        _fileName = name;
+      });
+    } catch (e) {
+      if (mounted) orgToast(context, errorText(e), error: true);
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
   Future<void> _submit() async {
     final feedback = _feedback.text.trim();
-    if (!widget.approve && feedback.isEmpty) {
+    if (!widget.approve && feedback.isEmpty && _fileUrl == null) {
       orgToast(context, 'Tell the assignee what needs to change', error: true);
       return;
     }
@@ -758,6 +774,7 @@ class _ReviewDeliverableSheetState extends State<ReviewDeliverableSheet> {
         widget.task.id,
         approved: widget.approve,
         feedback: feedback,
+        fileUrl: _fileUrl,
       );
       if (!mounted) return;
       Navigator.pop(context, task);
@@ -787,12 +804,33 @@ class _ReviewDeliverableSheetState extends State<ReviewDeliverableSheet> {
             textCapitalization: TextCapitalization.sentences,
             decoration: orgInputDecoration(widget.approve ? 'Feedback (optional)' : 'What needs to change?'),
           ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: _uploading || _loading ? null : _pickFile,
+            icon: _uploading
+                ? SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2, value: _progress > 0 ? _progress : null, color: orgTeal),
+                  )
+                : const Icon(Icons.attach_file_rounded, size: 18, color: Colors.white),
+            label: Text(
+              _fileName ?? 'Attach a file (optional)',
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+            ),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(44),
+              side: const BorderSide(color: orgBorder),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+          ),
           const SizedBox(height: 22),
           SizedBox(
             width: double.infinity,
             height: 50,
             child: ElevatedButton(
-              onPressed: _loading ? null : _submit,
+              onPressed: _loading || _uploading ? null : _submit,
               style: ElevatedButton.styleFrom(
                 backgroundColor: widget.approve ? projGreen : projRed,
                 foregroundColor: Colors.white,

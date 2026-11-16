@@ -57,7 +57,7 @@ Color projRoleColor(ProjectRole r) {
     case ProjectRole.projectManager:
       return projAmber;
     case ProjectRole.internalMember:
-      return orgMuted;
+      return projAmber;
     case ProjectRole.freelancer:
       return orgTeal;
     case ProjectRole.client:
@@ -241,6 +241,7 @@ class ProjTaskCard extends StatelessWidget {
     required this.onApprove,
     required this.onRequestChanges,
     required this.onOpenDeliverable,
+    required this.onOpenFeedbackFile,
   });
 
   final ProjectTask task;
@@ -253,8 +254,9 @@ class ProjTaskCard extends StatelessWidget {
   final VoidCallback onApprove;
   final VoidCallback onRequestChanges;
   final VoidCallback onOpenDeliverable;
+  final VoidCallback onOpenFeedbackFile;
 
-  bool get _canWork => isManager || isAssignee;
+  bool get _canWork => isAssignee;
 
   @override
   Widget build(BuildContext context) {
@@ -346,9 +348,13 @@ class ProjTaskCard extends StatelessWidget {
         ];
       case ProjectTaskStatus.inProgress:
         return [
-          if (task.reviewFeedback != null) ...[
+          if (task.reviewFeedback != null || task.reviewFeedbackUrl != null) ...[
             const SizedBox(height: 10),
-            _note('Changes requested', task.reviewFeedback!, projRed),
+            _note('Changes requested', task.reviewFeedback ?? 'Please see the attached file.', projRed),
+            if (task.reviewFeedbackUrl != null) ...[
+              const SizedBox(height: 6),
+              _fileRow(task.reviewFeedbackUrl!, onOpenFeedbackFile),
+            ],
           ],
           if (_canWork) ...[
             const SizedBox(height: 12),
@@ -423,15 +429,21 @@ class ProjTaskCard extends StatelessWidget {
             const SizedBox(height: 8),
             _note('Manager feedback', task.reviewFeedback!, projGreen),
           ],
+          if (task.reviewFeedbackUrl != null) ...[
+            const SizedBox(height: 6),
+            _fileRow(task.reviewFeedbackUrl!, onOpenFeedbackFile),
+          ],
         ];
       case ProjectTaskStatus.cancelled:
         return const [];
     }
   }
 
-  Widget _deliverableRow() {
+  Widget _deliverableRow() => _fileRow(task.deliverableUrl!, onOpenDeliverable);
+
+  Widget _fileRow(String url, VoidCallback onTap) {
     return InkWell(
-      onTap: onOpenDeliverable,
+      onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 2),
@@ -441,7 +453,7 @@ class ProjTaskCard extends StatelessWidget {
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                task.deliverableUrl!,
+                url,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(

@@ -264,8 +264,6 @@ class _ProjectCard extends StatelessWidget {
               children: [
                 ProjChip(label: '${project.tasksCount} tasks', color: projBlue, icon: Icons.task_alt_rounded),
                 ProjChip(label: '${project.membersCount} members', color: orgTeal, icon: Icons.group_rounded),
-                if (project.budget != null)
-                  ProjChip(label: projMoney(project.budget!), color: projGreen, icon: Icons.payments_rounded),
                 if (project.dueDate != null)
                   ProjChip(label: projDate(project.dueDate!), color: orgMuted, icon: Icons.event_rounded),
               ],

@@ -8,6 +8,7 @@ import 'package:quorum_app/api/project_repository.dart';
 import 'package:quorum_app/api/socket_service.dart';
 import 'package:quorum_app/models/project_models.dart';
 import 'package:quorum_app/screens/organization_screen/organization_widgets.dart';
+import 'project_chat_tab.dart';
 import 'project_sheets.dart';
 import 'project_widgets.dart';
 
@@ -23,7 +24,7 @@ class ProjectDetailScreen extends StatefulWidget {
 class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTickerProviderStateMixin {
   final _repo = ProjectRepository.instance;
   final _socket = SocketService.instance;
-  late final TabController _tabs = TabController(length: 3, vsync: this);
+  late final TabController _tabs = TabController(length: 4, vsync: this);
 
   late Project _project = widget.project;
   List<ProjectTask> _tasks = [];
@@ -34,6 +35,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
   String? _error;
   final Set<String> _busy = {};
   String? _joinedConversation;
+  bool _chatActive = false;
 
   late final Map<String, SocketHandler> _handlers = {
     'project:task_created': (d) => _onTask(d),
@@ -47,11 +49,22 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
   };
 
   ProjectMember? get _me => _project.memberFor(CurrentUser.id);
-  bool get _isManager => widget.orgAdmin || _me?.role == ProjectRole.projectManager;
+  bool get _isManager {
+    final role = _me?.role;
+    if (role == null) return widget.orgAdmin;
+    if (role == ProjectRole.projectManager) return true;
+    return role == ProjectRole.internalMember && widget.orgAdmin;
+  }
+  bool get _isFreelancer => _me?.role == ProjectRole.freelancer;
+  bool get _canAddFiles => _isManager || _isFreelancer;
 
   @override
   void initState() {
     super.initState();
+    _tabs.addListener(() {
+      final active = _tabs.index == 3;
+      if (active != _chatActive && mounted) setState(() => _chatActive = active);
+    });
     _load();
     _connectSocket();
   }
@@ -230,11 +243,10 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
   }
 
   Future<void> _editTask(ProjectTask t) async {
-    final isAssignee = t.assigneeId == CurrentUser.id;
-    if (!_isManager && !isAssignee) return;
+    if (!_isManager) return;
     final task = await showProjectSheet<ProjectTask>(
       context,
-      TaskFormSheet(projectId: _project.id, members: _project.members, task: t, canEditCore: _isManager),
+      TaskFormSheet(projectId: _project.id, members: _project.members, task: t),
     );
     if (task == null || !mounted) return;
     setState(() => _upsertTask(task));
@@ -341,6 +353,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: orgBg,
+      resizeToAvoidBottomInset: !_chatActive,
       appBar: AppBar(
         backgroundColor: orgBg,
         elevation: 0,
@@ -382,6 +395,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
             const Tab(text: 'Tasks'),
             Tab(text: 'Members (${_project.members.length})'),
             Tab(text: 'Files (${_resources.length})'),
+            const Tab(text: 'Chat'),
           ],
         ),
       ),
@@ -395,7 +409,13 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
               ? _errorView()
               : TabBarView(
                   controller: _tabs,
-                  children: [_tasksTab(), _membersTab(), _filesTab()],
+                  physics: _chatActive ? const NeverScrollableScrollPhysics() : null,
+                  children: [
+                    _tasksTab(),
+                    _membersTab(),
+                    _filesTab(),
+                    ProjectChatTab(project: _project, active: _chatActive, onRetry: _reloadProject),
+                  ],
                 ),
     );
   }
@@ -404,6 +424,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
     if (_loading || _error != null) return null;
     switch (_tabs.index) {
       case 0:
+        if (!_isManager) return null;
         return FloatingActionButton.extended(
           onPressed: _newTask,
           backgroundColor: orgAccent,
@@ -420,7 +441,10 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
           icon: const Icon(Icons.person_add_alt_1_rounded),
           label: const Text('Invite'),
         );
+      case 3:
+        return null;
       default:
+        if (!_canAddFiles) return null;
         return FloatingActionButton.extended(
           onPressed: _addResource,
           backgroundColor: orgAccent,
@@ -472,7 +496,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
                 child: ProjTaskCard(
                   task: t,
                   isManager: _isManager,
-                  isAssignee: t.assigneeId == CurrentUser.id,
+                  isAssignee: _isFreelancer && t.assigneeId == CurrentUser.id,
                   busy: _busy.contains(t.id),
                   onTap: () => _editTask(t),
                   onStart: () => _start(t),
@@ -480,6 +504,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
                   onApprove: () => _review(t, approve: true),
                   onRequestChanges: () => _review(t, approve: false),
                   onOpenDeliverable: () => _openUrl(t.deliverableUrl),
+                  onOpenFeedbackFile: () => _openUrl(t.reviewFeedbackUrl),
                 ),
               ),
         ],
@@ -513,7 +538,6 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
                 label: p.status.replaceAll('_', ' '),
                 color: p.status == 'ACTIVE' ? projGreen : orgMuted,
               ),
-              if (p.budget != null) ProjChip(label: projMoney(p.budget!), color: projGreen, icon: Icons.payments_rounded),
               if (p.dueDate != null) ProjChip(label: projDate(p.dueDate!), color: orgMuted, icon: Icons.event_rounded),
               if (_me != null) ProjChip(label: 'You: ${_me!.role.label}', color: projRoleColor(_me!.role)),
             ],
@@ -615,7 +639,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
               separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (context, i) {
                 final r = _resources[i];
-                final canDelete = _isManager || r.uploadedById == CurrentUser.id || r.uploadedById == null;
+                final canDelete = _isManager || (_isFreelancer && r.uploadedById == CurrentUser.id);
                 final meta = [
                   if (r.fileSize != null) projFileSize(r.fileSize),
                   if (r.uploadedBy != null) r.uploadedBy!.name,
