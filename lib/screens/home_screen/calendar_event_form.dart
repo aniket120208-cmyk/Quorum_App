@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/meeting_api.dart';
 import 'package:quorum_app/models/calendar_models.dart';
@@ -262,6 +263,7 @@ class _CalendarEventFormState extends State<CalendarEventForm> {
                 style: const TextStyle(color: Colors.white),
                 decoration: _inputDecoration('Event title'),
                 maxLength: 120,
+                buildCounter: charLimitCounter,
                 validator: (value) {
                   final text = value?.trim() ?? '';
                   if (text.isEmpty) return 'Enter an event title';

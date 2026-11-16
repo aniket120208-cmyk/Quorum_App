@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:quorum_app/api/api_exception.dart';
@@ -167,6 +168,8 @@ class _EditOrganizationSheetState extends State<EditOrganizationSheet> {
             controller: _nameCtrl,
             style: const TextStyle(color: Colors.white),
             textCapitalization: TextCapitalization.words,
+            maxLength: 100,
+            buildCounter: charLimitCounter,
             decoration: orgInputDecoration('Organization name').copyWith(errorText: _nameError),
           ),
           const SizedBox(height: 14),
@@ -176,6 +179,8 @@ class _EditOrganizationSheetState extends State<EditOrganizationSheet> {
             minLines: 2,
             maxLines: 4,
             textCapitalization: TextCapitalization.sentences,
+            maxLength: 250,
+            buildCounter: charLimitCounter,
             decoration: orgInputDecoration('Description').copyWith(errorText: _descError),
           ),
           const SizedBox(height: 22),
@@ -241,6 +246,8 @@ class _CreateTeamSheetState extends State<CreateTeamSheet> {
             controller: _nameCtrl,
             style: const TextStyle(color: Colors.white),
             textCapitalization: TextCapitalization.words,
+            maxLength: kNameMaxLength,
+            buildCounter: charLimitCounter,
             decoration: orgInputDecoration('Team name', hint: 'e.g. Frontend Engineering'),
           ),
           const SizedBox(height: 14),
@@ -381,6 +388,8 @@ class _EditTeamSheetState extends State<EditTeamSheet> {
             controller: _nameCtrl,
             style: const TextStyle(color: Colors.white),
             textCapitalization: TextCapitalization.words,
+            maxLength: kNameMaxLength,
+            buildCounter: charLimitCounter,
             decoration: orgInputDecoration('Team name'),
           ),
           const SizedBox(height: 14),
@@ -786,6 +795,8 @@ class _InviteSheetState extends State<InviteSheet> {
           style: const TextStyle(color: Colors.white),
           keyboardType: TextInputType.emailAddress,
           autocorrect: false,
+          maxLength: kEmailMaxLength,
+          buildCounter: charLimitCounter,
           decoration: orgInputDecoration('Email (optional)', hint: 'Restrict this link to one email'),
         ),
         const SizedBox(height: 16),

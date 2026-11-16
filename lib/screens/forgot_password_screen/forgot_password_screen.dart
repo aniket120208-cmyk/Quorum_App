@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/auth_service.dart';
 import 'package:quorum_app/screens/reset_password_screen/reset_password_screen.dart';
@@ -252,6 +253,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                                   TextFormField(
                                     controller: _emailController,
                                     keyboardType: TextInputType.emailAddress,
+                                    maxLength: kEmailMaxLength,
+                                    buildCounter: charLimitCounter,
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 14,

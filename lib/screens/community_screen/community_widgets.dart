@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:flutter/services.dart';
 import 'package:quorum_app/models/community_models.dart';
 import 'package:quorum_app/screens/chat_screen/attachment_widgets.dart';
@@ -199,6 +200,7 @@ class _TextPromptDialogState extends State<TextPromptDialog> {
         minLines: 1,
         maxLines: widget.maxLines,
         maxLength: widget.maxLength,
+        buildCounter: charLimitCounter,
         style: const TextStyle(color: AppColors.textPrimary),
         decoration: communityFieldDecoration(widget.hint ?? '').copyWith(
           counterStyle: const TextStyle(color: AppColors.textSecondary),
@@ -290,6 +292,8 @@ class _CommunityFormDialogState extends State<CommunityFormDialog> {
             TextField(
               controller: _name,
               autofocus: true,
+              maxLength: 100,
+              buildCounter: charLimitCounter,
               textCapitalization: TextCapitalization.words,
               style: const TextStyle(color: AppColors.textPrimary),
               decoration: communityFieldDecoration(widget.nameHint),
@@ -302,6 +306,8 @@ class _CommunityFormDialogState extends State<CommunityFormDialog> {
             const SizedBox(height: 12),
             TextField(
               controller: _desc,
+              maxLength: 250,
+              buildCounter: charLimitCounter,
               minLines: 3,
               maxLines: 5,
               textCapitalization: TextCapitalization.sentences,

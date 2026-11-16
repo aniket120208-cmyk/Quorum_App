@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:quorum_app/form_validators.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
 import 'package:quorum_app/screens/community_screen/community_widgets.dart';
@@ -91,6 +92,8 @@ class _CommunityFormScreenState extends State<CommunityFormScreen> {
                     _label('Name'),
                     TextField(
                       controller: _name,
+                      maxLength: 100,
+                      buildCounter: charLimitCounter,
                       autofocus: true,
                       textCapitalization: TextCapitalization.words,
                       style: const TextStyle(color: AppColors.textPrimary),
@@ -101,6 +104,8 @@ class _CommunityFormScreenState extends State<CommunityFormScreen> {
                     _label('Description'),
                     TextField(
                       controller: _desc,
+                      maxLength: 250,
+                      buildCounter: charLimitCounter,
                       minLines: 4,
                       maxLines: 8,
                       textCapitalization: TextCapitalization.sentences,

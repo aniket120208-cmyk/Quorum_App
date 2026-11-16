@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/meeting_api.dart';
@@ -548,6 +549,7 @@ class _KnockSheetState extends State<_KnockSheet> {
             controller: _message,
             style: const TextStyle(color: Colors.white),
             maxLength: 140,
+            buildCounter: charLimitCounter,
             textCapitalization: TextCapitalization.sentences,
             decoration: orgInputDecoration('Message (optional)', hint: 'Got 2 mins for a quick check?'),
           ),

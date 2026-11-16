@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:quorum_app/models/chat_models.dart';
 import 'chat_action_sheets.dart';
 import 'chat_room_screen.dart';
@@ -415,6 +416,7 @@ class _ChatScreenState extends State<ChatScreen> {
           controller: ctrl,
           autofocus: true,
           maxLength: 100,
+          buildCounter: charLimitCounter,
           style: const TextStyle(color: AppColors.textPrimary),
           decoration: const InputDecoration(hintText: 'e.g. Project Engineering'),
         ),

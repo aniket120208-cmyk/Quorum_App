@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:quorum_app/screens/organization_screen/organization_widgets.dart';
 import 'whiteboard_controller.dart';
 
@@ -71,6 +72,7 @@ class _WhiteboardNameSheetState extends State<WhiteboardNameSheet> {
             controller: _name,
             autofocus: true,
             maxLength: widget.maxLength,
+            buildCounter: charLimitCounter,
             minLines: 1,
             maxLines: widget.maxLines,
             textInputAction: widget.maxLines == 1 ? TextInputAction.done : TextInputAction.newline,
@@ -83,7 +85,6 @@ class _WhiteboardNameSheetState extends State<WhiteboardNameSheet> {
               hintText: widget.hint,
               hintStyle: const TextStyle(color: orgMuted),
               errorText: _error,
-              counterText: '',
               filled: true,
               fillColor: orgField,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
@@ -231,6 +232,7 @@ class _WhiteboardTextSheetState extends State<WhiteboardTextSheet> {
                 minLines: 1,
                 maxLines: 4,
                 maxLength: 500,
+                buildCounter: charLimitCounter,
                 textCapitalization: TextCapitalization.sentences,
                 keyboardType: TextInputType.multiline,
                 style: const TextStyle(color: Colors.white),

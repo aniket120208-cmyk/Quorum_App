@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/organization_repository.dart';
 import 'package:quorum_app/api/profile_picture_repository.dart';
@@ -124,6 +125,8 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
         const SizedBox(height: 12),
         TextField(
           controller: _emailCtrl,
+          maxLength: kEmailMaxLength,
+          buildCounter: charLimitCounter,
           style: const TextStyle(color: Colors.white),
           keyboardType: TextInputType.emailAddress,
           autocorrect: false,
@@ -261,6 +264,8 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
                 const SizedBox(height: 24),
                 TextFormField(
                   controller: _nameCtrl,
+                  maxLength: 100,
+                  buildCounter: charLimitCounter,
                   style: const TextStyle(color: Colors.white),
                   textCapitalization: TextCapitalization.words,
                   decoration: orgInputDecoration('Organization name', hint: 'e.g. Acme Corporation'),
@@ -269,6 +274,8 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _descCtrl,
+                  maxLength: 250,
+                  buildCounter: charLimitCounter,
                   style: const TextStyle(color: Colors.white),
                   minLines: 3,
                   maxLines: 5,

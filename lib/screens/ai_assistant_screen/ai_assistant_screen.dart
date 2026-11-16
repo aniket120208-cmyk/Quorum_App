@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -320,13 +321,6 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
     );
   }
 
-  Widget _hideCounter(
-    BuildContext context, {
-    required int currentLength,
-    required bool isFocused,
-    required int? maxLength,
-  }) => const SizedBox.shrink();
-
   Widget _modeBar() {
     return Padding(
       padding: const EdgeInsets.only(top: 6),
@@ -562,7 +556,7 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
             maxLength: 10000,
             maxLines: 3,
             minLines: 2,
-            buildCounter: _hideCounter,
+            buildCounter: charLimitCounter,
             style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
             decoration: _fieldDecoration('Paste a discussion or notes for context'),
           ));
@@ -698,7 +692,7 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
                             minLines: 1,
                             maxLines: 5,
                             maxLength: _mode == AiMode.search ? 1000 : 10000,
-                            buildCounter: _hideCounter,
+                            buildCounter: charLimitCounter,
                             textCapitalization: TextCapitalization.sentences,
                             style: const TextStyle(
                               color: AppColors.textPrimary,

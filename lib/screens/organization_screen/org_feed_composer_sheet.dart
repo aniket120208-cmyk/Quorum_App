@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/current_user.dart';
@@ -34,7 +35,6 @@ InputDecoration _fieldDecoration(String hint) {
     hintStyle: const TextStyle(color: Color(0xFF5A5E6B)),
     filled: true,
     fillColor: orgField,
-    counterText: '',
     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     border: border(orgBorder),
     enabledBorder: border(orgBorder),
@@ -572,6 +572,7 @@ class _OrgFeedComposerSheetState extends State<OrgFeedComposerSheet> {
     return TextField(
       controller: _title,
       maxLength: 160,
+      buildCounter: charLimitCounter,
       style: const TextStyle(color: Colors.white, fontSize: 14),
       cursorColor: feedPurple,
       decoration: _fieldDecoration('Title'),
@@ -582,6 +583,7 @@ class _OrgFeedComposerSheetState extends State<OrgFeedComposerSheet> {
     return TextField(
       controller: _content,
       maxLength: 10000,
+      buildCounter: charLimitCounter,
       minLines: 5,
       maxLines: 8,
       style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.4),
@@ -901,6 +903,7 @@ class _OrgFeedEditSheetState extends State<OrgFeedEditSheet> {
           TextField(
             controller: _title,
             maxLength: 160,
+            buildCounter: charLimitCounter,
             style: const TextStyle(color: Colors.white, fontSize: 14),
             cursorColor: feedPurple,
             decoration: _fieldDecoration('Title'),
@@ -909,6 +912,7 @@ class _OrgFeedEditSheetState extends State<OrgFeedEditSheet> {
           TextField(
             controller: _content,
             maxLength: 10000,
+            buildCounter: charLimitCounter,
             minLines: 4,
             maxLines: 8,
             style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.4),

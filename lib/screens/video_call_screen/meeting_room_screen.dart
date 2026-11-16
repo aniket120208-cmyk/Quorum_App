@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' show FontFeature;
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -2190,9 +2191,9 @@ class _ChatBottomSheetState extends State<_ChatBottomSheet> {
                         style: const TextStyle(color: Colors.white),
                         textInputAction: TextInputAction.send,
                         maxLength: 500,
+                        buildCounter: charLimitCounter,
                         onSubmitted: (_) => _send(),
                         decoration: InputDecoration(
-                          counterText: '',
                           hintText: 'Message everyone',
                           hintStyle: const TextStyle(color: Colors.white30),
                           filled: true,

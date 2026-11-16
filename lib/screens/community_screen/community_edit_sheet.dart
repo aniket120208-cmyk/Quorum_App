@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/community_repository.dart';
 import 'package:quorum_app/api/profile_picture_repository.dart';
@@ -141,6 +142,8 @@ class _EditCommunitySheetState extends State<EditCommunitySheet> {
           const SizedBox(height: 14),
           TextField(
             controller: _nameCtrl,
+            maxLength: 100,
+            buildCounter: charLimitCounter,
             style: const TextStyle(color: Colors.white),
             textCapitalization: TextCapitalization.words,
             decoration: orgInputDecoration('Community name').copyWith(errorText: _nameError),
@@ -148,6 +151,8 @@ class _EditCommunitySheetState extends State<EditCommunitySheet> {
           const SizedBox(height: 14),
           TextField(
             controller: _descCtrl,
+            maxLength: 250,
+            buildCounter: charLimitCounter,
             style: const TextStyle(color: Colors.white),
             minLines: 2,
             maxLines: 4,

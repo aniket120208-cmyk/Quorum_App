@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:flutter/services.dart';
 import 'package:quorum_app/models/poll_models.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
@@ -375,7 +376,6 @@ class _CreatePollSheetState extends State<_CreatePollSheet> {
   InputDecoration _decoration(String hint) => InputDecoration(
         hintText: hint,
         hintStyle: const TextStyle(color: AppColors.textSecondary),
-        counterText: '',
         filled: true,
         fillColor: const Color(0xFF0F101A),
         isDense: true,
@@ -427,6 +427,7 @@ class _CreatePollSheetState extends State<_CreatePollSheet> {
               TextField(
                 controller: _question,
                 maxLength: pollMaxQuestionLength,
+                buildCounter: charLimitCounter,
                 minLines: 1,
                 maxLines: 3,
                 textCapitalization: TextCapitalization.sentences,
@@ -452,6 +453,7 @@ class _CreatePollSheetState extends State<_CreatePollSheet> {
                         child: TextField(
                           controller: _options[i],
                           maxLength: pollMaxOptionLength,
+                          buildCounter: charLimitCounter,
                           textCapitalization: TextCapitalization.sentences,
                           style: const TextStyle(color: AppColors.textPrimary),
                           decoration: _decoration('Option ${i + 1}'),

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/project_repository.dart';
 import 'package:quorum_app/api/upload_service.dart';
@@ -290,6 +291,8 @@ class _InviteCollaboratorSheetState extends State<InviteCollaboratorSheet> {
           style: const TextStyle(color: Colors.white),
           keyboardType: TextInputType.emailAddress,
           autocorrect: false,
+          maxLength: kEmailMaxLength,
+          buildCounter: charLimitCounter,
           decoration: orgInputDecoration('Email', hint: 'name@company.com'),
         ),
         const SizedBox(height: 14),

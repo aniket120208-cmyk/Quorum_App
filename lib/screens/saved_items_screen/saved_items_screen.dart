@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/chat_repository.dart';
 import 'package:quorum_app/api/community_repository.dart';
@@ -967,13 +968,16 @@ class _CollectionDialogState extends State<_CollectionDialog> {
               controller: _name,
               autofocus: true,
               maxLength: 100,
+              buildCounter: charLimitCounter,
               textCapitalization: TextCapitalization.words,
               style: const TextStyle(color: Colors.white),
-              decoration: orgInputDecoration('Name').copyWith(counterText: ''),
+              decoration: orgInputDecoration('Name'),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _desc,
+              maxLength: 500,
+              buildCounter: charLimitCounter,
               minLines: 2,
               maxLines: 4,
               style: const TextStyle(color: Colors.white),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/api/org_feed_repository.dart';
@@ -502,13 +503,13 @@ class _OrgFeedCommentsScreenState extends State<OrgFeedCommentsScreen> {
                       minLines: 1,
                       maxLines: 4,
                       maxLength: 2000,
+                      buildCounter: charLimitCounter,
                       textCapitalization: TextCapitalization.sentences,
                       style: const TextStyle(color: Colors.white, fontSize: 14),
                       cursorColor: feedPurple,
                       decoration: InputDecoration(
                         hintText: 'Write a comment...',
                         hintStyle: const TextStyle(color: Color(0xFF5A5E6B)),
-                        counterText: '',
                         filled: true,
                         fillColor: orgField,
                         isDense: true,

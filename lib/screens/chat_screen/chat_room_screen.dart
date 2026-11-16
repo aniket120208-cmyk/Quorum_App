@@ -33,7 +33,7 @@ import 'team_chat_context.dart';
 import 'voice_widgets.dart';
 
 const int _maxMessageLength = 20000;
-const int _counterThreshold = 1000;
+const int _counterThreshold = 20;
 
 String _formatCount(int n) => n.toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',');
 

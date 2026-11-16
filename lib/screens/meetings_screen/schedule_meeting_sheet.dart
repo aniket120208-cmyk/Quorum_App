@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/meeting_api.dart';
 import 'package:quorum_app/api/organization_repository.dart';
@@ -287,6 +288,8 @@ class _ScheduleMeetingSheetState extends State<ScheduleMeetingSheet> {
           ),
           TextField(
             controller: _titleCtrl,
+            maxLength: 200,
+            buildCounter: charLimitCounter,
             style: const TextStyle(color: Colors.white),
             textCapitalization: TextCapitalization.sentences,
             decoration: orgInputDecoration('Title (optional)', hint: 'e.g. Quarterly roadmap').copyWith(errorText: _titleError),

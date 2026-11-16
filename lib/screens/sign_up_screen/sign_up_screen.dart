@@ -1,6 +1,7 @@
 import 'package:cloudflare_turnstile/cloudflare_turnstile.dart';
 import 'package:flutter/material.dart';
 import 'package:quorum_app/widgets/turnstile_captcha.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/auth_service.dart';
 import 'package:quorum_app/screens/sign_in_screen/sign_in_screen.dart';
@@ -26,10 +27,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
   final _turnstileController = TurnstileController();
   String? _captchaToken;
 
-  final RegExp _nameRegex = RegExp(r"^[a-zA-Z\s]{2,50}$");
+  final RegExp _nameRegex = RegExp(r"^[a-zA-Z\s]{2,150}$");
   final RegExp _emailRegex = RegExp(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$");
 
-  bool get _hasMinLength => _passwordController.text.length >= 8;
+  bool get _hasMinLength => _passwordController.text.length >= kPasswordMinLength && _passwordController.text.length <= kPasswordMaxLength;
   bool get _hasLetter => RegExp(r'[A-Za-z]').hasMatch(_passwordController.text);
   bool get _hasDigit => RegExp(r'[0-9]').hasMatch(_passwordController.text);
   bool get _hasSpecialChar => RegExp(r'[!@#\$%^&*(),.?":{}|<>]').hasMatch(_passwordController.text);
@@ -171,6 +172,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                       hintText: 'Enter your name',
                                       prefixIcon: Icons.person_outline_rounded,
                                       keyboardType: TextInputType.name,
+                                      maxLength: kNameMaxLength,
                                       validator: (value) {
                                         final text = value?.trim() ?? '';
                                         if (text.isEmpty) {
@@ -190,6 +192,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                       hintText: 'example@company.com',
                                       prefixIcon: Icons.mail_outline_rounded,
                                       keyboardType: TextInputType.emailAddress,
+                                      maxLength: kEmailMaxLength,
                                       validator: (value) {
                                         final text = value?.trim() ?? '';
                                         if (text.isEmpty) {
@@ -209,6 +212,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                       hintText: 'Create a strong password',
                                       prefixIcon: Icons.lock_outline_rounded,
                                       obscureText: _obscurePassword,
+                                      maxLength: kPasswordMaxLength,
                                       hasError: showPasswordHints && !_isPasswordValid,
                                       suffixIcon: IconButton(
                                         icon: Icon(
@@ -239,7 +243,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                         spacing: 12,
                                         runSpacing: 6,
                                         children: [
-                                          _buildRequirementChip('8+ chars', _hasMinLength),
+                                          _buildRequirementChip('8-16 chars', _hasMinLength),
                                           _buildRequirementChip('1 letter', _hasLetter),
                                           _buildRequirementChip('1 number', _hasDigit),
                                           _buildRequirementChip('1 special', _hasSpecialChar),
@@ -254,6 +258,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                       hintText: 'Confirm password',
                                       prefixIcon: Icons.lock_outline_rounded,
                                       obscureText: _obscureConfirmPassword,
+                                      maxLength: kPasswordMaxLength,
                                       hasError: showConfirmError,
                                       suffixIcon: IconButton(
                                         icon: Icon(
@@ -428,6 +433,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     Widget? suffixIcon,
     String? Function(String?)? validator,
     bool hasError = false,
+    int? maxLength,
   }) {
     final borderColor = hasError ? const Color(0xFFEF4444) : Colors.transparent;
     final focusedBorderColor = hasError ? const Color(0xFFEF4444) : const Color(0xFF4C4FE8);
@@ -437,6 +443,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
       keyboardType: keyboardType,
       obscureText: obscureText,
       validator: validator,
+      maxLength: maxLength,
+      buildCounter: charLimitCounter,
       style: const TextStyle(
         color: Colors.white,
         fontSize: 14,

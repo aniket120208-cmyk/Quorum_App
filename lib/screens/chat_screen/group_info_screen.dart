@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/chat_repository.dart';
@@ -419,6 +420,7 @@ class _PromptDialogState extends State<_PromptDialog> {
         controller: _ctrl,
         autofocus: true,
         maxLength: widget.maxLength,
+        buildCounter: charLimitCounter,
         style: const TextStyle(color: AppColors.textPrimary),
       ),
       actions: [

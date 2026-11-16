@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:flutter/services.dart';
 import 'package:quorum_app/api/api_exception.dart';
 import 'package:quorum_app/api/auth_service.dart';
@@ -24,7 +25,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   bool _isLoading = false;
   bool _isResending = false;
 
-  bool get _hasMinLength => _newPasswordController.text.length >= 8;
+  bool get _hasMinLength => _newPasswordController.text.length >= kPasswordMinLength && _newPasswordController.text.length <= kPasswordMaxLength;
   bool get _hasLetter => RegExp(r'[A-Za-z]').hasMatch(_newPasswordController.text);
   bool get _hasDigit => RegExp(r'[0-9]').hasMatch(_newPasswordController.text);
   bool get _hasSpecialChar => RegExp(r'[!@#\$%^&*(),.?":{}|<>]').hasMatch(_newPasswordController.text);
@@ -230,7 +231,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                             spacing: 12,
                             runSpacing: 6,
                             children: [
-                              _buildRequirementChip('8+ chars', _hasMinLength),
+                              _buildRequirementChip('8-16 chars', _hasMinLength),
                               _buildRequirementChip('1 letter', _hasLetter),
                               _buildRequirementChip('1 number', _hasDigit),
                               _buildRequirementChip('1 special', _hasSpecialChar),
@@ -439,6 +440,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     return TextFormField(
       controller: controller,
       obscureText: obscureText,
+      maxLength: kPasswordMaxLength,
+      buildCounter: charLimitCounter,
       style: const TextStyle(color: Colors.white, fontSize: 14),
       decoration: InputDecoration(
         filled: true,

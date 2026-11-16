@@ -1,5 +1,6 @@
 import 'package:cloudflare_turnstile/cloudflare_turnstile.dart';
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:quorum_app/widgets/turnstile_captcha.dart';
 import 'package:quorum_app/screens/forgot_password_screen/forgot_password_screen.dart';
 import 'package:quorum_app/screens/sign_up_screen/sign_up_screen.dart';
@@ -241,6 +242,7 @@ class _SignInScreenState extends State<SignInScreen> {
                                     hintText: 'example@company.com',
                                     prefixIcon: Icons.mail_outline_rounded,
                                     keyboardType: TextInputType.emailAddress,
+                                    maxLength: kEmailMaxLength,
                                     validator: (value) {
                                       final text = value?.trim() ?? '';
                                       if (text.isEmpty) {
@@ -260,6 +262,7 @@ class _SignInScreenState extends State<SignInScreen> {
                                     hintText: 'Enter your password',
                                     prefixIcon: Icons.lock_outline_rounded,
                                     obscureText: _obscurePassword,
+                                    maxLength: kPasswordMaxLength,
                                     suffixIcon: IconButton(
                                       icon: Icon(
                                         _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
@@ -276,6 +279,9 @@ class _SignInScreenState extends State<SignInScreen> {
                                       final text = value ?? '';
                                       if (text.isEmpty) {
                                         return 'Password is required';
+                                      }
+                                      if (text.length < kPasswordMinLength || text.length > kPasswordMaxLength) {
+                                        return 'Password must be 8-16 characters';
                                       }
                                       return null;
                                     },
@@ -412,12 +418,15 @@ class _SignInScreenState extends State<SignInScreen> {
     bool obscureText = false,
     Widget? suffixIcon,
     String? Function(String?)? validator,
+    int? maxLength,
   }) {
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
       obscureText: obscureText,
       validator: validator,
+      maxLength: maxLength,
+      buildCounter: charLimitCounter,
       style: const TextStyle(
         color: Colors.white,
         fontSize: 14,

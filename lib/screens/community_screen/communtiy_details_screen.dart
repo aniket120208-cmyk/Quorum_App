@@ -794,7 +794,8 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
       color: AppColors.primary,
       backgroundColor: AppColors.surface,
       onRefresh: _refresh,
-      child: ListView.builder(
+      child: LayoutBuilder(
+        builder: (context, box) => ListView.builder(
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
@@ -827,18 +828,21 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
               );
             }
             if (_posts.isEmpty) {
-              return const Padding(
-                padding: EdgeInsets.symmetric(vertical: 40),
-                child: Column(
-                  children: [
-                    Icon(Icons.forum_outlined, size: 44, color: AppColors.textSecondary),
-                    SizedBox(height: 10),
-                    Text(
-                      'No posts yet.\nBe the first to share something.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: AppColors.textSecondary),
-                    ),
-                  ],
+              return SizedBox(
+                height: box.maxHeight - 28,
+                child: const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.forum_outlined, size: 44, color: AppColors.textSecondary),
+                      SizedBox(height: 10),
+                      Text(
+                        'No posts yet.\nBe the first to share something.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AppColors.textSecondary),
+                      ),
+                    ],
+                  ),
                 ),
               );
             }
@@ -860,6 +864,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
             onToggleSave: () => _toggleSavePost(post),
           );
         },
+        ),
       ),
     );
   }

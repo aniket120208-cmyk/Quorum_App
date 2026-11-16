@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:flutter/services.dart';
 import 'package:quorum_app/api/document_repository.dart';
 import 'package:quorum_app/api/whiteboard_repository.dart';
@@ -565,6 +566,7 @@ class _DocumentTextSheetState extends State<DocumentTextSheet> {
             controller: _text,
             autofocus: true,
             maxLength: widget.maxLength,
+            buildCounter: charLimitCounter,
             keyboardType: widget.keyboardType,
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => _submit(),
@@ -576,7 +578,6 @@ class _DocumentTextSheetState extends State<DocumentTextSheet> {
               hintText: widget.hint,
               hintStyle: const TextStyle(color: orgMuted),
               errorText: _error,
-              counterText: '',
               filled: true,
               fillColor: orgField,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),

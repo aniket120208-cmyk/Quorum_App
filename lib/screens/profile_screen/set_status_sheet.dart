@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quorum_app/widgets/char_limit.dart';
 import 'package:quorum_app/api/presence_service.dart';
 import 'package:quorum_app/models/presence_models.dart';
 import 'package:quorum_app/screens/chat_screen/chat_widgets.dart';
@@ -141,6 +142,7 @@ class _SetStatusSheetState extends State<_SetStatusSheet> {
               TextField(
                 controller: _message,
                 maxLength: 100,
+                buildCounter: charLimitCounter,
                 style: const TextStyle(color: AppColors.textPrimary),
                 decoration: InputDecoration(
                   hintText: "What's on your mind?",
