@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:quorum_app/api/api_client.dart';
 import 'package:quorum_app/api/api_exception.dart';
+import 'package:quorum_app/api/current_user.dart';
 import 'package:quorum_app/models/meeting_models.dart';
 import 'package:quorum_app/models/poll_models.dart';
 
@@ -32,6 +33,8 @@ class MeetingApi {
         host.endsWith('.quorum.com');
     return quorumHost && uri.pathSegments.any((s) => s == 'meet');
   }
+
+  final Map<String, ScopedMeeting> _created = {};
 
   Dio get _dio => ApiClient.instance.dio;
 
@@ -102,15 +105,33 @@ class MeetingApi {
         if (scope == MeetingScope.team && teamId != null) 'teamId': teamId,
         if (scheduledStartTime != null) 'scheduledStartTime': scheduledStartTime.toUtc().toIso8601String(),
       });
-      return ScopedMeeting.fromJson(_unwrap(response));
+      final meeting = ScopedMeeting.fromJson(_unwrap(response));
+      if (meeting.code.isNotEmpty) _created[meeting.code] = meeting;
+      return meeting;
     } on DioException catch (e) {
       throw _toApiException(e);
     }
   }
 
+  List<ScopedMeeting> _withCreated(List<ScopedMeeting> fetched) {
+    final seen = fetched.map((m) => m.code).toSet();
+    final cutoff = DateTime.now().subtract(const Duration(hours: 4));
+    _created.removeWhere((code, m) {
+      final start = m.scheduledStartTime;
+      return !m.isOpen || (start != null && start.isBefore(cutoff));
+    });
+    final extra = _created.values.where((m) => !seen.contains(m.code) && (!CurrentUser.isLoaded || m.hostId.isEmpty || m.hostId == CurrentUser.id));
+    return [...fetched, ...extra];
+  }
+
+  List<ScopedMeeting> _mergeScoped(List<ScopedMeeting> fetched, bool Function(ScopedMeeting) test) {
+    final seen = fetched.map((m) => m.code).toSet();
+    return [...fetched, ..._created.values.where((m) => m.isOpen && !seen.contains(m.code) && test(m))];
+  }
+
   Future<List<ScopedMeeting>> upcomingMeetings() async {
     try {
-      return _unwrapList(await _dio.get('/api/meetings/upcoming'));
+      return _withCreated(_unwrapList(await _dio.get('/api/meetings/upcoming')));
     } on DioException catch (e) {
       throw _toApiException(e);
     }
@@ -118,7 +139,8 @@ class MeetingApi {
 
   Future<List<ScopedMeeting>> organizationMeetings(String organizationId) async {
     try {
-      return _unwrapList(await _dio.get('/api/meetings/organization/$organizationId'));
+      final fetched = _unwrapList(await _dio.get('/api/meetings/organization/$organizationId'));
+      return _mergeScoped(fetched, (m) => m.organizationId == organizationId);
     } on DioException catch (e) {
       throw _toApiException(e);
     }
@@ -126,7 +148,8 @@ class MeetingApi {
 
   Future<List<ScopedMeeting>> teamMeetings(String teamId) async {
     try {
-      return _unwrapList(await _dio.get('/api/meetings/team/$teamId'));
+      final fetched = _unwrapList(await _dio.get('/api/meetings/team/$teamId'));
+      return _mergeScoped(fetched, (m) => m.teamId == teamId);
     } on DioException catch (e) {
       throw _toApiException(e);
     }
@@ -135,6 +158,7 @@ class MeetingApi {
   Future<void> cancelMeeting(String code) async {
     try {
       await _dio.patch('/api/meetings/$code/cancel', data: <String, dynamic>{});
+      _created.remove(code);
     } on DioException catch (e) {
       throw _toApiException(e);
     }
@@ -162,6 +186,7 @@ class MeetingApi {
   Future<void> endMeeting(String code) async {
     try {
       await _dio.post('/api/meetings/$code/end', data: <String, dynamic>{});
+      _created.remove(code);
     } on DioException catch (e) {
       throw _toApiException(e);
     }

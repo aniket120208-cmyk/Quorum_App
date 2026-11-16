@@ -1,14 +1,21 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show SystemSound, SystemSoundType;
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:quorum_app/api/api_client.dart';
+import 'package:quorum_app/api/current_user.dart' show avatarFromJson;
 import 'package:quorum_app/api/meeting_api.dart';
+import 'package:quorum_app/api/recording_mixer.dart';
+import 'package:quorum_app/api/recording_repository.dart';
+import 'package:quorum_app/api/recording_uploader.dart';
 import 'package:quorum_app/api/screen_share_foreground.dart';
 import 'package:quorum_app/api/socket_service.dart' show asMap;
 import 'package:quorum_app/models/chat_models.dart' show ChatUser;
 import 'package:quorum_app/models/meeting_models.dart';
 import 'package:quorum_app/models/poll_models.dart';
+import 'package:quorum_app/models/recording_models.dart';
 
 enum MeetingPhase { idle, connecting, waitingRoom, inCall, failed, rejected, ended }
 
@@ -34,6 +41,7 @@ class MeetingService extends ChangeNotifier {
     required this.meetingCode,
     required this.userId,
     required this.userName,
+    this.userAvatar,
     this.isHost = false,
   });
 
@@ -48,6 +56,7 @@ class MeetingService extends ChangeNotifier {
   final String meetingCode;
   final String userId;
   final String userName;
+  final String? userAvatar;
   bool isHost;
   final RTCVideoRenderer localRenderer = RTCVideoRenderer();
   final StreamController<String> _notices = StreamController<String>.broadcast();
@@ -56,6 +65,8 @@ class MeetingService extends ChangeNotifier {
   MediaStream? _localStream;
   MediaStreamTrack? _cameraTrack;
   RTCRtpSender? _videoSender;
+  RTCRtpSender? _audioSender;
+  MediaStream? _recordDisplayStream;
   MediaStream? _screenStream;
   MediaStreamTrack? _screenTrack;
   RTCPeerConnection? _publisher;
@@ -75,6 +86,7 @@ class MeetingService extends ChangeNotifier {
   final List<Poll> _polls = [];
   final Set<String> _votingPolls = {};
   final List<WaitingGuest> _waiting = [];
+  MeetingDocument? _activeDocument;
 
   MeetingPhase _phase = MeetingPhase.idle;
   String? _message;
@@ -96,6 +108,18 @@ class MeetingService extends ChangeNotifier {
   int _selfReactionAcked = 0;
   int _selfReactionEchoed = 0;
   int _unreadChat = 0;
+  RecordingStatusEvent? _recording;
+  bool _recordingBusy = false;
+  bool _capturing = false;
+  MediaRecorder? _recorder;
+  String? _recordPath;
+  String? _captureId;
+  MediaRecorder? _micRecorder;
+  final List<MicSegment> _micSegments = [];
+  Future<void> _micChain = Future<void>.value();
+  final Stopwatch _recordWatch = Stopwatch();
+  Future<void>? _finalizing;
+  int _previewEpoch = 0;
 
   Stream<String> get notices => _notices.stream;
   Stream<MeetingReaction> get reactions => _reactions.stream;
@@ -106,14 +130,32 @@ class MeetingService extends ChangeNotifier {
   bool get isVideoOff => _isVideoOff;
   bool get hasLocalVideo => _hasLocalVideo;
   bool get isScreenSharing => _isScreenSharing;
+  int get previewEpoch => _previewEpoch;
   bool get isFrontCamera => _frontCamera;
   bool get soundOn => _soundOn;
+  bool get isRecording => _recording?.isRecording == true;
+  bool get recordingBusy => _recordingBusy;
+  bool get isCapturingRecording => _capturing;
+  RecordingStatusEvent? get recording => _recording;
   int get unreadChat => _unreadChat;
   List<RemotePeer> get participants => _peers.values.toList(growable: false);
+
+  RemotePeer? get remoteSharer {
+    for (final p in _peers.values) {
+      if (p.isScreenSharing) return p;
+    }
+    return null;
+  }
   List<MeetingChatMessage> get chat => List.unmodifiable(_chat);
   List<Poll> get polls => List.unmodifiable(_polls);
   int get openPollCount => _polls.where((p) => !p.isClosed).length;
   List<WaitingGuest> get waitingList => List.unmodifiable(_waiting);
+  MeetingDocument? get activeDocument => _activeDocument;
+  bool get canCloseDocument {
+    final doc = _activeDocument;
+    if (doc == null) return false;
+    return isHost || doc.openedBy.isEmpty || doc.openedBy == userId;
+  }
   bool get _connected => _socket?.connected ?? false;
 
   void _notify() {
@@ -206,6 +248,7 @@ class MeetingService extends ChangeNotifier {
       t.enabled = !_isMuted;
     }
     if (_inCall) _emitMic(_isMuted);
+    _syncMicSegment();
     _notify();
   }
 
@@ -219,6 +262,12 @@ class MeetingService extends ChangeNotifier {
 
   Future<void> startScreenShare() async {
     if (_isScreenSharing || _screenShareBusy || !_inCall || _tornDown) return;
+    final other = remoteSharer;
+    if (other != null) {
+      final who = other.name.trim().isEmpty ? 'Someone' : other.name;
+      _notice('$who is already sharing their screen');
+      return;
+    }
     final sender = _videoSender;
     if (sender == null) {
       _notice('Screen sharing needs your camera to be available');
@@ -227,19 +276,26 @@ class MeetingService extends ChangeNotifier {
     _screenShareBusy = true;
     MediaStream? stream;
     try {
-      if (!await ScreenShareForeground.start()) {
-        _notice('Screen sharing permission was denied');
+      stream = _recordDisplayStream;
+      if (stream == null) {
+        if (!await ScreenShareForeground.start()) {
+          _notice('Screen sharing permission was denied');
+          return;
+        }
+        stream = await _captureDisplay();
+      }
+      final tracks = stream.getVideoTracks();
+      final taken = remoteSharer;
+      if (taken != null) {
+        await _discardScreenStream(stream);
+        await _stopForeground();
+        final who = taken.name.trim().isEmpty ? 'Someone' : taken.name;
+        _notice('$who is already sharing their screen');
         return;
       }
-      final iOS = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        'video': iOS ? {'deviceId': 'broadcast'} : true,
-        'audio': false,
-      });
-      final tracks = stream.getVideoTracks();
       if (tracks.isEmpty || _tornDown || !_inCall || _videoSender == null) {
         await _discardScreenStream(stream);
-        await ScreenShareForeground.stop();
+        await _stopForeground();
         return;
       }
       final track = tracks.first;
@@ -251,13 +307,23 @@ class MeetingService extends ChangeNotifier {
       if (_isVideoOff) _emitCam(false);
       _emitScreenShare(true);
       _notify();
+      unawaited(_refreshMic());
     } catch (_) {
       if (stream != null) await _discardScreenStream(stream);
-      await ScreenShareForeground.stop();
+      await _stopForeground();
       _notice('Unable to start screen sharing');
     } finally {
       _screenShareBusy = false;
     }
+  }
+
+  Future<MediaStream> _captureDisplay() async {
+    final iOS = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+    final constraints = <String, dynamic>{
+      'video': iOS ? {'deviceId': 'broadcast'} : true,
+      'audio': false,
+    };
+    return navigator.mediaDevices.getDisplayMedia(constraints);
   }
 
   Future<void> stopScreenShare() async {
@@ -276,7 +342,8 @@ class MeetingService extends ChangeNotifier {
       } catch (_) {}
     }
     if (stream != null) await _discardScreenStream(stream);
-    await ScreenShareForeground.stop();
+    await _stopForeground();
+    await _restoreLocalPreview();
     if (_inCall) {
       _emitScreenShare(false);
       if (_isVideoOff) _emitCam(true);
@@ -284,7 +351,59 @@ class MeetingService extends ChangeNotifier {
     _notify();
   }
 
+  Future<void> _restoreLocalPreview() async {
+    if (_tornDown || !_rendererReady) return;
+    final stream = _localStream;
+    if (stream == null) return;
+    _cameraTrack?.enabled = !_isVideoOff;
+    localRenderer.srcObject = null;
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    if (_tornDown || !_rendererReady || _localStream == null) return;
+    localRenderer.srcObject = _localStream;
+    _previewEpoch++;
+  }
+
+  Future<void> _stopForeground() async {
+    if (_recordDisplayStream != null) return;
+    await ScreenShareForeground.stop();
+  }
+
+  Future<void> _refreshMic() async {
+    if (!_hasLocalAudio) return;
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    final sender = _audioSender;
+    final local = _localStream;
+    if (sender == null || local == null || _tornDown || !_inCall) return;
+    try {
+      final fresh = await navigator.mediaDevices.getUserMedia({'audio': true, 'video': false});
+      final tracks = fresh.getAudioTracks();
+      if (tracks.isEmpty) return;
+      final track = tracks.first;
+      track.enabled = !_isMuted;
+      final old = List<MediaStreamTrack>.of(local.getAudioTracks());
+      await sender.replaceTrack(track);
+      for (final t in old) {
+        try {
+          await local.removeTrack(t);
+          await t.stop();
+        } catch (_) {}
+      }
+      await local.addTrack(track);
+    } catch (_) {}
+  }
+
+  Future<void> _releaseRecordDisplay() async {
+    final stream = _recordDisplayStream;
+    _recordDisplayStream = null;
+    if (stream == null) return;
+    if (!(_isScreenSharing && identical(_screenStream, stream))) {
+      await _discardScreenStream(stream);
+      await ScreenShareForeground.stop();
+    }
+  }
+
   Future<void> _discardScreenStream(MediaStream stream) async {
+    if (identical(stream, _recordDisplayStream)) return;
     for (final t in stream.getTracks()) {
       try {
         await t.stop();
@@ -304,7 +423,10 @@ class MeetingService extends ChangeNotifier {
     _screenStream = null;
     _videoSender = null;
     if (stream != null) await _discardScreenStream(stream);
-    if (wasSharing) await ScreenShareForeground.stop();
+    if (wasSharing) {
+      _emitScreenShare(false);
+      await _stopForeground();
+    }
   }
 
   Future<void> switchCamera() async {
@@ -475,6 +597,11 @@ class MeetingService extends ChangeNotifier {
       if (peer.isScreenSharing != sharing) {
         peer.isScreenSharing = sharing;
         peer.fitContain = sharing;
+        if (sharing && _isScreenSharing && userId.compareTo(peer.userId) > 0) {
+          final who = peer.name.trim().isEmpty ? 'Someone' : peer.name;
+          _notice('$who started sharing their screen');
+          unawaited(stopScreenShare());
+        }
         _notify();
       }
     });
@@ -484,6 +611,7 @@ class MeetingService extends ChangeNotifier {
         for (final t in _localStream?.getAudioTracks() ?? const <MediaStreamTrack>[]) {
           t.enabled = false;
         }
+        _syncMicSegment();
         _notify();
       }
       _notice(asMap(d)?['message']?.toString() ?? 'You have been muted by the host');
@@ -559,6 +687,13 @@ class MeetingService extends ChangeNotifier {
       _polls[i] = _polls[i].copyWith(isClosed: true);
       _notify();
     });
+    for (final name in const ['meeting:document_opened', 'meeting:document-opened']) {
+      s.on(name, (d) => _onDocumentOpened(asMap(d)));
+    }
+    for (final name in const ['meeting:document_closed', 'meeting:document-closed']) {
+      s.on(name, (d) => _onDocumentClosed(asMap(d)));
+    }
+    s.on('meeting:recording-status', (d) => _onRecordingStatus(asMap(d)));
     s.on('meeting:ended', (d) {
       final text = asMap(d)?['message']?.toString() ?? 'The meeting has been ended by the host';
       _finish(MeetingPhase.ended, text);
@@ -587,6 +722,8 @@ class MeetingService extends ChangeNotifier {
       final name = (m['name'] ?? '').toString();
       final peer = _peerFor(id, name: name);
       if (name.isNotEmpty) peer.name = name;
+      final avatar = avatarFromJson(m) ?? (m['user'] is Map ? avatarFromJson(m['user'] as Map) : null);
+      if (avatar != null) peer.avatarUrl = avatar;
       _notify();
     });
     s.on('sfu:peer-left', (d) {
@@ -678,7 +815,12 @@ class MeetingService extends ChangeNotifier {
   void _resendSfu() {
     final socket = _socket;
     if (socket == null || !socket.connected || _tornDown || _sfuJoined) return;
-    socket.emit('sfu:join', {'roomCode': meetingCode, 'peerId': userId, 'name': userName});
+    socket.emit('sfu:join', {
+      'roomCode': meetingCode,
+      'peerId': userId,
+      'name': userName,
+      if (userAvatar != null) 'avatar': userAvatar,
+    });
     final offer = _offerPayload;
     if (offer != null) {
       socket.emit('sfu:offer', offer);
@@ -705,6 +847,7 @@ class MeetingService extends ChangeNotifier {
     _inCall = true;
     _setPhase(MeetingPhase.inCall);
     unawaited(loadPolls());
+    unawaited(loadRecordingStatus());
     if (_isMuted && _hasLocalAudio) _emitMic(true);
     if (_isVideoOff && _hasLocalVideo) _emitCam(true);
     unawaited(_startPublishing());
@@ -721,6 +864,8 @@ class MeetingService extends ChangeNotifier {
       final name = (item['name'] ?? '').toString();
       final peer = _peerFor(id, name: name);
       if (name.isNotEmpty) peer.name = name;
+      final avatar = avatarFromJson(item) ?? (item['user'] is Map ? avatarFromJson(item['user'] as Map) : null);
+      if (avatar != null) peer.avatarUrl = avatar;
       if (item.containsKey('isMuted')) peer.isMuted = item['isMuted'] == true;
       if (item.containsKey('isVideoOff')) peer.isVideoOff = item['isVideoOff'] == true;
       if (item.containsKey('isHandRaised')) peer.isHandRaised = item['isHandRaised'] == true;
@@ -776,9 +921,11 @@ class MeetingService extends ChangeNotifier {
         _publisher = pc;
         pc.onIceCandidate = (c) => _emitCandidate(c);
         _videoSender = null;
+        _audioSender = null;
         for (final track in stream.getTracks()) {
           final sender = await pc.addTrack(track, stream);
           if (track.kind == 'video') _videoSender = sender;
+          if (track.kind == 'audio') _audioSender = sender;
         }
         final screenTrack = _screenTrack;
         if (_isScreenSharing && screenTrack != null && _videoSender != null) {
@@ -786,7 +933,12 @@ class MeetingService extends ChangeNotifier {
         }
       }
 
-      socket.emit('sfu:join', {'roomCode': meetingCode, 'peerId': userId, 'name': userName});
+      socket.emit('sfu:join', {
+      'roomCode': meetingCode,
+      'peerId': userId,
+      'name': userName,
+      if (userAvatar != null) 'avatar': userAvatar,
+    });
 
       if (pc != null) {
         final offer = await pc.createOffer();
@@ -1004,6 +1156,7 @@ class MeetingService extends ChangeNotifier {
   void _emitScreenShare(bool sharing) {
     if (_connected) {
       _socket!.emit('meeting:toggle-screen-share', {'meetingCode': meetingCode, 'isSharing': sharing});
+      _socket!.emit('meeting:screen-share', {'meetingCode': meetingCode, 'isSharing': sharing});
     }
   }
 
@@ -1272,6 +1425,75 @@ class MeetingService extends ChangeNotifier {
     }
   }
 
+  void _onDocumentOpened(Map<String, dynamic>? m) {
+    if (m == null || _tornDown) return;
+    final code = (m['meetingCode'] ?? '').toString();
+    if (code.isNotEmpty && code != meetingCode) return;
+    final id = (m['documentId'] ?? m['id'] ?? '').toString();
+    if (id.isEmpty) return;
+    final title = (m['title'] ?? m['documentTitle'] ?? '').toString();
+    final reported = (m['openedBy'] ?? '').toString();
+    final changed = _activeDocument?.documentId != id;
+    final self = reported == userId || (userName.isNotEmpty && reported == userName);
+    final keepOwner = !changed && _activeDocument?.openedBy == userId;
+    final openedBy = self || keepOwner ? userId : reported;
+    _activeDocument = MeetingDocument(
+      documentId: id,
+      title: title.isEmpty ? (_activeDocument?.title ?? 'Meeting notes') : title,
+      openedBy: openedBy,
+    );
+    if (changed && !self) {
+      String who = '';
+      for (final peer in _peers.values) {
+        if (peer.userId == openedBy) who = peer.name;
+      }
+      if (who.isEmpty && openedBy.isNotEmpty && !_looksLikeId(openedBy)) who = openedBy;
+      _notice(who.isEmpty ? 'A document was opened' : '$who opened a document');
+    }
+    _notify();
+  }
+
+  bool _looksLikeId(String value) => value.length >= 20 && !value.contains(' ');
+
+  void _onDocumentClosed(Map<String, dynamic>? m) {
+    if (_activeDocument == null) return;
+    final code = (m?['meetingCode'] ?? '').toString();
+    if (code.isNotEmpty && code != meetingCode) return;
+    final id = (m?['documentId'] ?? '').toString();
+    if (id.isNotEmpty && id != _activeDocument!.documentId) return;
+    _activeDocument = null;
+    _notify();
+  }
+
+  void openDocument(String documentId, String title) {
+    final socket = _socket;
+    if (!_inCall || socket == null || !socket.connected) {
+      _notice('Not connected to the meeting');
+      return;
+    }
+    socket.emit('meeting:document_opened', {
+      'meetingCodeOrId': meetingCode,
+      'documentId': documentId,
+      'documentTitle': title,
+    });
+    _activeDocument = MeetingDocument(documentId: documentId, title: title, openedBy: userId);
+    _notify();
+  }
+
+  void closeDocument() {
+    final doc = _activeDocument;
+    if (doc == null) return;
+    final socket = _socket;
+    if (socket != null && socket.connected) {
+      socket.emit('meeting:document_closed', {
+        'meetingCodeOrId': meetingCode,
+        'documentId': doc.documentId,
+      });
+    }
+    _activeDocument = null;
+    _notify();
+  }
+
   void _fail(String text) {
     _finish(MeetingPhase.failed, text);
   }
@@ -1285,6 +1507,11 @@ class MeetingService extends ChangeNotifier {
   }
 
   Future<void> leave({bool endForAll = false}) async {
+    if (_capturing) {
+      await stopRecording();
+    } else if (endForAll && isHost && isRecording) {
+      await stopRecording();
+    }
     final socket = _socket;
     if (socket != null && socket.connected) {
       socket.emit('sfu:leave', {'roomCode': meetingCode});
@@ -1300,6 +1527,7 @@ class MeetingService extends ChangeNotifier {
 
   void _closeSocket() {
     _sfuRetryTimer?.cancel();
+    _activeDocument = null;
     final s = _socket;
     _socket = null;
     s?.dispose();
@@ -1347,6 +1575,7 @@ class MeetingService extends ChangeNotifier {
     _tornDown = true;
     _joinTimeout?.cancel();
     _inCall = false;
+    if (_capturing) await _abortCapture();
     _closeSocket();
     await _releaseMedia();
     if (_rendererReady) {
@@ -1355,6 +1584,288 @@ class MeetingService extends ChangeNotifier {
         await localRenderer.dispose();
       } catch (_) {}
     }
+  }
+
+  Future<Map<String, dynamic>?> _ackRequest(
+    String event,
+    Map<String, dynamic> payload, {
+    Duration timeout = const Duration(seconds: 12),
+  }) {
+    final socket = _socket;
+    if (socket == null || !socket.connected) return Future.value(null);
+    final completer = Completer<Map<String, dynamic>?>();
+    final timer = Timer(timeout, () {
+      if (!completer.isCompleted) completer.complete(null);
+    });
+    socket.emitWithAck(event, payload, ack: (raw) {
+      timer.cancel();
+      if (!completer.isCompleted) completer.complete(asMap(raw));
+    });
+    return completer.future;
+  }
+
+  Future<void> loadRecordingStatus() async {
+    final res = await _ackRequest('meeting:get-recording-status', {'meetingCode': meetingCode});
+    if (res == null || _disposed || _tornDown) return;
+    final data = res['data'] is Map ? Map<String, dynamic>.from(res['data'] as Map) : res;
+    if (data['isRecording'] == null && data['status'] == null) return;
+    final event = RecordingStatusEvent.fromJson(data);
+    if (event.isRecording) {
+      _recording = event;
+      _notify();
+    } else if (_recording != null && !_capturing) {
+      _recording = null;
+      _notify();
+    }
+  }
+
+  void _onRecordingStatus(Map<String, dynamic>? m) {
+    if (m == null || _disposed) return;
+    final event = RecordingStatusEvent.fromJson(m);
+    final wasRecording = isRecording;
+    if (event.isRecording) {
+      _recording = event;
+      if (!wasRecording && event.startedBy?.id != userId) {
+        final who = event.startedBy?.name ?? 'The host';
+        _notice('$who started recording this meeting.');
+        SystemSound.play(SystemSoundType.alert);
+      }
+    } else {
+      _recording = null;
+      if (wasRecording) {
+        if (_capturing && event.stoppedBy?.id != userId) {
+          unawaited(_finalizeCapture(event.recordingId));
+        }
+        if (event.stoppedBy?.id != userId) _notice('Recording stopped. Processing video...');
+      }
+    }
+    _notify();
+  }
+
+  Future<MediaStreamTrack?> _recordingVideoTrack() async {
+    if (_recordDisplayStream == null && _isScreenSharing && _screenStream != null) {
+      _recordDisplayStream = _screenStream;
+    }
+    if (_recordDisplayStream == null) {
+      if (!await ScreenShareForeground.start()) return null;
+      try {
+        _recordDisplayStream = await _captureDisplay();
+      } catch (_) {
+        await ScreenShareForeground.stop();
+        return null;
+      }
+    }
+    final tracks = _recordDisplayStream?.getVideoTracks();
+    if (tracks == null || tracks.isEmpty) {
+      await _releaseRecordDisplay();
+      return null;
+    }
+    return tracks.first;
+  }
+
+  void _syncMicSegment() {
+    _micChain = _micChain.then((_) async {
+      final want = _capturing && !_isMuted && _hasLocalAudio;
+      if (want && _micRecorder == null) {
+        final path = '${Directory.systemTemp.path}/quorum-mic-$meetingCode-${DateTime.now().microsecondsSinceEpoch}.mp4';
+        final rec = MediaRecorder();
+        try {
+          await rec.start(path, audioChannel: RecorderAudioChannel.INPUT);
+          _micRecorder = rec;
+          _micSegments.add(MicSegment(path, _recordWatch.elapsedMilliseconds));
+        } catch (_) {}
+      } else if (!want && _micRecorder != null) {
+        final rec = _micRecorder;
+        _micRecorder = null;
+        try {
+          await rec!.stop().timeout(const Duration(seconds: 8));
+        } catch (_) {}
+      }
+    }).catchError((_) {});
+  }
+
+  Future<String?> startRecording() async {
+    if (!isHost) return 'Only the host can record this meeting';
+    if (_recordingBusy || isRecording || _capturing) return null;
+    if (!_inCall || !_connected) return 'Not connected to the meeting';
+    _recordingBusy = true;
+    _notify();
+    MediaRecorder? recorder;
+    String? path;
+    try {
+      final track = await _recordingVideoTrack();
+      if (track == null) return 'Screen recording permission is required to record this meeting.';
+      path = '${Directory.systemTemp.path}/quorum-rec-$meetingCode-${DateTime.now().millisecondsSinceEpoch}.mp4';
+      recorder = MediaRecorder();
+      try {
+        await recorder.start(path, videoTrack: track, audioChannel: RecorderAudioChannel.OUTPUT);
+      } catch (_) {
+        recorder = null;
+        await _releaseRecordDisplay();
+        return 'Recording is not supported on this device.';
+      }
+      _recordWatch
+        ..reset()
+        ..start();
+      final res = await _ackRequest('meeting:start-recording', {'meetingCode': meetingCode});
+      if (res == null || res['success'] != true) {
+        _recordWatch.stop();
+        try {
+          await recorder.stop();
+        } catch (_) {}
+        recorder = null;
+        await _releaseRecordDisplay();
+        await _deleteQuietly(path);
+        return (res?['message'] ?? res?['error'] ?? 'Could not start the recording').toString();
+      }
+      final data = res['data'] is Map ? Map<String, dynamic>.from(res['data'] as Map) : <String, dynamic>{};
+      _recorder = recorder;
+      _recordPath = path;
+      _captureId = data['id']?.toString();
+      _capturing = true;
+      _micSegments.clear();
+      _syncMicSegment();
+      final event = RecordingStatusEvent.fromJson({
+        'isRecording': true,
+        'status': 'RECORDING',
+        'recordingId': data['id'],
+        'meetingCode': meetingCode,
+        'startedBy': {'id': userId, 'name': userName},
+        'startedAt': data['startedAt'],
+      });
+      _recording = RecordingStatusEvent(
+        isRecording: true,
+        status: RecordingStatus.recording,
+        recordingId: event.recordingId,
+        meetingCode: meetingCode,
+        startedBy: event.startedBy,
+        startedAt: event.startedAt ?? DateTime.now(),
+      );
+      return null;
+    } finally {
+      _recordingBusy = false;
+      _notify();
+    }
+  }
+
+  Future<String?> stopRecording() async {
+    if (!isRecording && !_capturing) return null;
+    if (_recordingBusy) return null;
+    _recordingBusy = true;
+    _notify();
+    try {
+      final id = _recording?.recordingId;
+      String? failure;
+      if (_connected) {
+        final res = await _ackRequest('meeting:stop-recording', {'meetingCode': meetingCode});
+        if (res == null || res['success'] != true) {
+          failure = (res?['message'] ?? res?['error'] ?? 'Could not stop the recording').toString();
+        }
+      } else {
+        try {
+          await RecordingRepository.instance.stop(meetingCode);
+        } catch (e) {
+          failure = e.toString();
+        }
+      }
+      if (failure != null) return failure;
+      _recording = null;
+      unawaited(_finalizeInBackground(id));
+      _notice('Recording stopped. Processing video...');
+      return null;
+    } finally {
+      _recordingBusy = false;
+      _notify();
+    }
+  }
+
+  Future<void> _awaitStableFile(String path) async {
+    var last = -1;
+    var stable = 0;
+    for (var i = 0; i < 50; i++) {
+      var size = 0;
+      try {
+        final f = File(path);
+        if (await f.exists()) size = await f.length();
+      } catch (_) {}
+      if (size > 0 && size == last) {
+        stable++;
+        if (stable >= 3) return;
+      } else {
+        stable = 0;
+      }
+      last = size;
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
+  }
+
+  Future<void> _finalizeInBackground(String? recordingId) {
+    final f = _finalizeCapture(recordingId).catchError((_) {});
+    _finalizing = f;
+    f.whenComplete(() {
+      if (identical(_finalizing, f)) _finalizing = null;
+    });
+    return f;
+  }
+
+  Future<void> _finalizeCapture(String? recordingId) async {
+    final recorder = _recorder;
+    final path = _recordPath;
+    if (recorder == null || path == null) {
+      await _releaseRecordDisplay();
+      return;
+    }
+    final id = (recordingId != null && recordingId.isNotEmpty) ? recordingId : _captureId;
+    _recorder = null;
+    _recordPath = null;
+    _captureId = null;
+    _capturing = false;
+    _recordWatch.stop();
+    final seconds = _recordWatch.elapsed.inSeconds < 1 ? 1 : _recordWatch.elapsed.inSeconds;
+    _syncMicSegment();
+    await _micChain.timeout(const Duration(seconds: 8), onTimeout: () {});
+    try {
+      await recorder.stop().timeout(const Duration(seconds: 8));
+    } catch (_) {}
+    await _releaseRecordDisplay();
+    final segments = List<MicSegment>.of(_micSegments);
+    _micSegments.clear();
+    if (id == null || id.isEmpty) {
+      await _deleteQuietly(path);
+      for (final s in segments) {
+        await _deleteQuietly(s.path);
+      }
+      return;
+    }
+    await _awaitStableFile(path);
+    for (final s in segments) {
+      await _awaitStableFile(s.path);
+    }
+    final finalPath = await RecordingMixer.mix(path, segments);
+    RecordingUploader.instance.enqueue(
+      meetingCode: meetingCode,
+      recordingId: id,
+      path: finalPath,
+      durationSeconds: seconds,
+    );
+    _notice('Uploading recording...');
+    _notify();
+  }
+
+  Future<void> _abortCapture() async {
+    final id = _recording?.recordingId;
+    try {
+      await RecordingRepository.instance.stop(meetingCode);
+    } catch (_) {}
+    _recording = null;
+    await _finalizeCapture(id);
+  }
+
+  Future<void> _deleteQuietly(String path) async {
+    try {
+      final f = File(path);
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
   }
 
   @override

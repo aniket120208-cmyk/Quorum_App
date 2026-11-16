@@ -22,6 +22,7 @@ class SocketService {
   final Set<String> _communityRooms = {};
   final Set<String> _channelRooms = {};
   final Set<String> _postRooms = {};
+  final Set<String> _orgRooms = {};
   final Map<String, Set<SocketHandler>> _handlers = {};
   final Set<void Function(bool connected)> _connectionListeners = {};
   bool _refreshing = false;
@@ -72,6 +73,9 @@ class SocketService {
       }
       for (final id in _postRooms) {
         sock.emit('community:post:join', {'postId': id});
+      }
+      for (final id in _orgRooms) {
+        sock.emit('org:join', {'organizationId': id});
       }
       for (final l in List.of(_connectionListeners)) {
         l(true);
@@ -185,6 +189,16 @@ class SocketService {
     if (isConnected) _s!.emit('community:post:leave', {'postId': id});
   }
 
+  void joinOrg(String id) {
+    _orgRooms.add(id);
+    if (isConnected) _s!.emit('org:join', {'organizationId': id});
+  }
+
+  void leaveOrg(String id) {
+    _orgRooms.remove(id);
+    if (isConnected) _s!.emit('org:leave', {'organizationId': id});
+  }
+
   void emit(String event, Map<String, dynamic> data) {
     if (isConnected) _s!.emit(event, data);
   }
@@ -216,6 +230,7 @@ class SocketService {
     _communityRooms.clear();
     _channelRooms.clear();
     _postRooms.clear();
+    _orgRooms.clear();
     activeConversationId = null;
     _s?.dispose();
     _s = null;

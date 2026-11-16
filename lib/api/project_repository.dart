@@ -61,14 +61,12 @@ class ProjectRepository {
     String organizationId, {
     required String name,
     String? description,
-    double? budget,
     DateTime? dueDate,
   }) =>
       _guard(() async {
         final r = await _dio.post('/api/projects/organization/$organizationId', data: {
           'name': name,
           if (description != null && description.isNotEmpty) 'description': description,
-          if (budget != null) 'budget': budget,
           if (dueDate != null) 'dueDate': _iso(dueDate),
         });
         return Project.fromJson(_map(_data(r)));
@@ -84,7 +82,6 @@ class ProjectRepository {
     String? name,
     String? description,
     String? status,
-    double? budget,
     DateTime? dueDate,
   }) =>
       _guard(() async {
@@ -92,7 +89,6 @@ class ProjectRepository {
           if (name != null) 'name': name,
           if (description != null) 'description': description,
           if (status != null) 'status': status,
-          if (budget != null) 'budget': budget,
           if (dueDate != null) 'dueDate': _iso(dueDate),
         });
         final d = _data(r);
@@ -156,17 +152,17 @@ class ProjectRepository {
     String projectId, {
     required String title,
     String? description,
-    ProjectTaskPriority priority = ProjectTaskPriority.medium,
-    String? assigneeId,
-    DateTime? dueDate,
+    required ProjectTaskPriority priority,
+    required String assigneeId,
+    required DateTime dueDate,
   }) =>
       _guard(() async {
         final r = await _dio.post('/api/projects/$projectId/tasks', data: {
           'title': title,
           if (description != null && description.isNotEmpty) 'description': description,
           'priority': priority.apiValue,
-          if (assigneeId != null) 'assigneeId': assigneeId,
-          if (dueDate != null) 'dueDate': _iso(dueDate),
+          'assigneeId': assigneeId,
+          'dueDate': _iso(dueDate),
         });
         return ProjectTask.fromJson(_map(_data(r)), projectId: projectId);
       });
@@ -219,11 +215,17 @@ class ProjectRepository {
     String taskId, {
     required bool approved,
     String? feedback,
+    String? fileUrl,
   }) =>
       _guard(() async {
+        final text = (feedback ?? '').trim();
+        final combined = fileUrl == null || fileUrl.isEmpty
+            ? text
+            : '${text.isEmpty ? 'Please see the attached file.' : text}\n\nAttachment: $fileUrl';
         final r = await _dio.post('/api/projects/$projectId/tasks/$taskId/review', data: {
           'approved': approved,
-          if (feedback != null && feedback.isNotEmpty) 'feedback': feedback,
+          if (combined.isNotEmpty) 'feedback': combined,
+          if (fileUrl != null && fileUrl.isNotEmpty) 'feedbackFileUrl': fileUrl,
         });
         return ProjectTask.fromJson(_map(_data(r)), projectId: projectId);
       });
